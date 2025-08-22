@@ -14,12 +14,14 @@ import {
   UserIcon,
   BrowserAutomationIcon,
 } from "@/components/icons";
+import { api } from "@/lib/api";
 
 interface Message {
   id: string;
   content: string;
   sender: "user" | "bot";
   timestamp: Date;
+  error?: boolean;
 }
 
 // Hydration-safe timestamp component
@@ -45,13 +47,16 @@ export default function AgentPage() {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
-      content: "Hello! I'm your AI agent. How can I help you today?",
+      content:
+        "Hello! I'm your AI agent powered by Mistral AI and browser automation capabilities via Portia SDK. How can I help you today?",
       sender: "bot",
       timestamp: new Date(),
     },
   ]);
   const [inputValue, setInputValue] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [conversationId, setConversationId] = useState<string>("");
+  const [isConnected, setIsConnected] = useState<boolean | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -61,6 +66,21 @@ export default function AgentPage() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Check backend connectivity on mount
+  useEffect(() => {
+    checkBackendHealth();
+  }, []);
+
+  const checkBackendHealth = async () => {
+    try {
+      await api.getHealthStatus();
+      setIsConnected(true);
+    } catch (error) {
+      console.error("Backend health check failed:", error);
+      setIsConnected(false);
+    }
+  };
 
   const handleSendMessage = async () => {
     if (!inputValue.trim()) return;
@@ -73,31 +93,94 @@ export default function AgentPage() {
     };
 
     setMessages((prev) => [...prev, userMessage]);
+    const currentInput = inputValue;
     setInputValue("");
     setIsTyping(true);
 
-    // Simulate AI response
-    setTimeout(() => {
+    try {
+      // Send message to backend
+      const response = await api.sendChatMessage({
+        message: currentInput,
+        conversation_id: conversationId || undefined,
+      });
+
+      // Update conversation ID if it's a new conversation
+      if (!conversationId) {
+        setConversationId(response.conversation_id);
+      }
+
       const botMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: "I understand your request. Let me help you with that.",
+        content: response.message,
+        sender: "bot",
+        timestamp: new Date(response.timestamp),
+      };
+
+      setMessages((prev) => [...prev, botMessage]);
+
+      // Check if automation is suggested
+      try {
+        const analysis = await api.analyzeAutomationRequest(currentInput);
+        if (analysis.automation_suggested) {
+          const automationMessage: Message = {
+            id: (Date.now() + 2).toString(),
+            content:
+              "🤖 I notice you might want to automate something. Would you like me to help with browser automation tasks?",
+            sender: "bot",
+            timestamp: new Date(),
+          };
+          setTimeout(() => {
+            setMessages((prev) => [...prev, automationMessage]);
+          }, 1000);
+        }
+      } catch (analysisError) {
+        console.log("Automation analysis failed:", analysisError);
+      }
+    } catch (error) {
+      console.error("Failed to send message:", error);
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        content: `Sorry, I encountered an error: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }. Please check if the backend is running.`,
         sender: "bot",
         timestamp: new Date(),
+        error: true,
       };
-      setMessages((prev) => [...prev, botMessage]);
+      setMessages((prev) => [...prev, errorMessage]);
+    } finally {
       setIsTyping(false);
-    }, 2000);
+    }
   };
 
-  const handleBrowserAutomation = () => {
+  const handleBrowserAutomation = async () => {
     const automationMessage: Message = {
       id: Date.now().toString(),
       content:
-        "I'll help you automate browser tasks. What would you like me to do?",
+        "🚀 Browser automation mode activated! I can help you with:\n\n• Extract data from websites\n• Fill forms automatically\n• Navigate and click elements\n• Monitor websites for changes\n\nWhat would you like me to automate?",
       sender: "bot",
       timestamp: new Date(),
     };
     setMessages((prev) => [...prev, automationMessage]);
+
+    // Check automation service health
+    try {
+      const health = await api.getAutomationHealth();
+      if (health.status !== "healthy") {
+        const warningMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          content:
+            "⚠️ Note: Some automation services may not be fully available. Please ensure your API keys are configured.",
+          sender: "bot",
+          timestamp: new Date(),
+        };
+        setTimeout(() => {
+          setMessages((prev) => [...prev, warningMessage]);
+        }, 1000);
+      }
+    } catch (error) {
+      console.log("Automation health check failed:", error);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -125,7 +208,15 @@ export default function AgentPage() {
       <div className="flex items-center justify-between p-4 border-b border-divider">
         <div>
           <h1 className={title({ color: "blue" })}>AI Agent Dashboard</h1>
-          <p className="text-default-500 mt-1">Welcome to your AI Assistant</p>
+          <p className="text-default-500 mt-1">
+            Powered by Mistral AI & Portia SDK
+            {isConnected === false && (
+              <span className="text-danger ml-2">• Backend Disconnected</span>
+            )}
+            {isConnected === true && (
+              <span className="text-success ml-2">• Connected</span>
+            )}
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <Button
@@ -133,9 +224,20 @@ export default function AgentPage() {
             variant="flat"
             startContent={<BrowserAutomationIcon />}
             onPress={handleBrowserAutomation}
+            isDisabled={isConnected === false}
           >
             Browser Automation
           </Button>
+          {isConnected === false && (
+            <Button
+              color="warning"
+              variant="bordered"
+              size="sm"
+              onPress={checkBackendHealth}
+            >
+              Reconnect
+            </Button>
+          )}
         </div>
       </div>
 
@@ -169,12 +271,21 @@ export default function AgentPage() {
                       className={`p-3 rounded-2xl max-w-xs lg:max-w-md xl:max-w-lg ${
                         message.sender === "user"
                           ? "bg-primary text-primary-foreground"
+                          : message.error
+                          ? "bg-danger-50 text-danger border border-danger-200"
                           : "bg-default-100"
                       }`}
                     >
-                      <p className="text-sm">{message.content}</p>
+                      <p className="text-sm whitespace-pre-wrap">
+                        {message.content}
+                      </p>
                     </div>
-                    <MessageTime timestamp={message.timestamp} />
+                    <div className="flex items-center gap-2">
+                      <MessageTime timestamp={message.timestamp} />
+                      {message.error && (
+                        <span className="text-xs text-danger">Failed</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
