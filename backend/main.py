@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Enhanced Nexus AI Backend - FastAPI Server with Robust Error Handling
-Improved version with better error handling and fallback strategies
+Nexus AI Backend - FastAPI Server
+Primary: Google Gemini 1.5 Pro | Secondary: Mistral AI
 """
 
 import os
 import asyncio
 import time
+import logging
 from typing import Dict, Any, Optional
 from contextlib import asynccontextmanager
 
@@ -15,6 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
 from dotenv import load_dotenv
+import httpx
+from mistralai import Mistral
 
 from portia import (
     Portia,
@@ -25,19 +28,38 @@ from portia import (
     example_tool_registry,
 )
 
-# Load environment variables
-load_dotenv('../.env.local')
+# Import Gemini integration
+from gemini_model import GeminiModel, create_gemini_config
 
-# Global Portia instances for fallback
+# Load environment variables
+load_dotenv("../.env.local")
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Configuration
+PORTIA_API_KEY = os.getenv("PORTIA_API_KEY")
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
+if not PORTIA_API_KEY:
+    raise ValueError("PORTIA_API_KEY not found in environment variables")
+
+# Global clients
+portia_gemini: Optional[Portia] = None
 portia_mistral: Optional[Portia] = None
-portia_openai: Optional[Portia] = None
+mistral_client: Optional[Mistral] = None
 
 class QueryRequest(BaseModel):
     """Request model for AI queries"""
     query: str
     user_id: Optional[str] = None
     session_id: Optional[str] = None
-    model_preference: Optional[str] = "mistral"  # "mistral", "openai", "auto"
+    model_preference: Optional[str] = "gemini"  # "gemini", "mistral", "auto"
 
 class QueryResponse(BaseModel):
     """Response model for AI queries"""
@@ -51,313 +73,366 @@ class QueryResponse(BaseModel):
 class HealthResponse(BaseModel):
     """Health check response model"""
     status: str
+    portia_gemini_configured: bool
     portia_mistral_configured: bool
-    portia_openai_configured: bool
     mistral_configured: bool
-    openai_configured: bool
+    google_configured: bool
     environment: str
 
-def setup_mistral_portia() -> Optional[Portia]:
-    """Setup Portia with Mistral AI"""
+def setup_gemini_portia() -> Optional[Portia]:
+    """Setup Portia with Google Gemini as primary model"""
     try:
-        mistral_api_key = os.getenv('MISTRAL_API_KEY')
-        portia_api_key = os.getenv('PORTIA_API_KEY')
-        
-        if not mistral_api_key:
-            print("⚠️  Mistral API key not found")
+        if not GOOGLE_API_KEY:
+            logger.warning("Google API key not found")
             return None
         
-        print("🚀 Setting up Portia with Mistral AI...")
+        logger.info("🤖 Setting up Portia with Google Gemini 1.5 Pro...")
+        
+        # Create Gemini configuration
+        config = create_gemini_config(
+            api_key=GOOGLE_API_KEY,
+            model_name="gemini-1.5-pro",
+            temperature=0.7,
+            max_tokens=2048,
+            storage_class=StorageClass.CLOUD if PORTIA_API_KEY else StorageClass.DISK,
+            storage_dir='nexus_runs_gemini' if not PORTIA_API_KEY else None,
+            default_log_level=LogLevel.INFO,
+        )
+        
+        portia = Portia(config=config, tools=example_tool_registry)
+        logger.info("✅ Gemini Portia configured successfully")
+        return portia
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to setup Gemini Portia: {str(e)}")
+        return None
+
+def setup_mistral_portia() -> Optional[Portia]:
+    """Setup Portia with Mistral AI as secondary model"""
+    try:
+        if not MISTRAL_API_KEY:
+            logger.warning("Mistral API key not found")
+            return None
+        
+        logger.info("📝 Setting up Portia with Mistral AI (secondary)...")
         
         config = Config.from_default(
             llm_provider=LLMProvider.MISTRALAI,
-            default_model="mistralai/mistral-small-latest",  # Use smaller model to avoid limits
+            default_model="mistralai/mistral-small-latest",
             planning_model="mistralai/mistral-small-latest",
             execution_model="mistralai/mistral-small-latest",
-            mistralai_api_key=mistral_api_key,
-            portia_api_key=portia_api_key,
-            storage_class=StorageClass.CLOUD if portia_api_key else StorageClass.DISK,
-            storage_dir='nexus_runs_mistral' if not portia_api_key else None,
+            mistralai_api_key=MISTRAL_API_KEY,
+            portia_api_key=PORTIA_API_KEY,
+            storage_class=StorageClass.CLOUD if PORTIA_API_KEY else StorageClass.DISK,
+            storage_dir='nexus_runs_mistral' if not PORTIA_API_KEY else None,
             default_log_level=LogLevel.INFO,
         )
         
         portia = Portia(config=config, tools=example_tool_registry)
-        print("✅ Mistral Portia initialized successfully")
+        logger.info("✅ Mistral Portia configured successfully")
         return portia
         
     except Exception as e:
-        print(f"❌ Failed to initialize Mistral Portia: {str(e)}")
+        logger.error(f"❌ Failed to setup Mistral Portia: {str(e)}")
         return None
 
-def setup_openai_portia() -> Optional[Portia]:
-    """Setup Portia with OpenAI as fallback"""
+def setup_mistral_client() -> Optional[Mistral]:
+    """Setup direct Mistral client for final fallback"""
     try:
-        openai_api_key = os.getenv('OPENAI_API_KEY')
-        portia_api_key = os.getenv('PORTIA_API_KEY')
-        
-        if not openai_api_key:
-            print("⚠️  OpenAI API key not found, skipping OpenAI fallback")
+        if not MISTRAL_API_KEY:
             return None
         
-        print("🔄 Setting up Portia with OpenAI fallback...")
-        
-        config = Config.from_default(
-            llm_provider=LLMProvider.OPENAI,
-            default_model="openai/gpt-4o-mini",  # Use smaller, cheaper model
-            openai_api_key=openai_api_key,
-            portia_api_key=portia_api_key,
-            storage_class=StorageClass.CLOUD if portia_api_key else StorageClass.DISK,
-            storage_dir='nexus_runs_openai' if not portia_api_key else None,
-            default_log_level=LogLevel.INFO,
-        )
-        
-        portia = Portia(config=config, tools=example_tool_registry)
-        print("✅ OpenAI Portia fallback initialized successfully")
-        return portia
+        client = Mistral(api_key=MISTRAL_API_KEY)
+        logger.info("✅ Direct Mistral client configured")
+        return client
         
     except Exception as e:
-        print(f"⚠️  OpenAI fallback setup failed: {str(e)}")
+        logger.error(f"❌ Failed to setup Mistral client: {str(e)}")
         return None
+
+async def initialize_services():
+    """Initialize all AI services"""
+    global portia_gemini, portia_mistral, mistral_client
+    
+    logger.info("🚀 Initializing AI services...")
+    
+    # Initialize Gemini (primary)
+    portia_gemini = setup_gemini_portia()
+    
+    # Initialize Mistral (secondary)
+    portia_mistral = setup_mistral_portia()
+    mistral_client = setup_mistral_client()
+    
+    # Log status
+    services_status = {
+        "Gemini Portia": bool(portia_gemini),
+        "Mistral Portia": bool(portia_mistral),
+        "Mistral Direct": bool(mistral_client)
+    }
+    
+    for service, status in services_status.items():
+        status_icon = "✅" if status else "❌"
+        logger.info(f"{status_icon} {service}: {'Available' if status else 'Not Available'}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan context manager"""
+    """Application lifespan manager"""
     # Startup
-    global portia_mistral, portia_openai
-    
-    print("🌟 Starting Nexus AI Backend with robust error handling...")
-    
-    # Try to setup Mistral first
-    portia_mistral = setup_mistral_portia()
-    
-    # Setup OpenAI as fallback
-    portia_openai = setup_openai_portia()
-    
-    if not portia_mistral and not portia_openai:
-        print("❌ No AI providers available! Check your API keys.")
-    else:
-        providers = []
-        if portia_mistral:
-            providers.append("Mistral AI")
-        if portia_openai:
-            providers.append("OpenAI")
-        print(f"✅ Available providers: {', '.join(providers)}")
-    
+    await initialize_services()
     yield
-    
     # Shutdown
-    print("🛑 Nexus AI Backend shutting down")
+    logger.info("🛑 Shutting down AI services")
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Enhanced Nexus AI Backend",
-    description="Robust AI agent backend with Portia.ai, Mistral AI, and OpenAI fallback",
-    version="2.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    title="Nexus AI Backend",
+    description="AI backend with Google Gemini (primary) and Mistral (secondary) integration",
+    version="3.0.0",
     lifespan=lifespan
 )
 
-# Configure CORS
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "https://nexus-agent-hack.vercel.app",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+async def execute_with_retry(
+    portia_instance: Portia,
+    query: str,
+    model_name: str,
+    max_retries: int = 3,
+    base_delay: float = 1.0
+) -> Dict[str, Any]:
+    """Execute query with exponential backoff retry logic"""
+    
+    for attempt in range(max_retries):
+        try:
+            logger.info(f"🔄 Attempt {attempt + 1}/{max_retries} for {model_name} query execution")
+            
+            start_time = time.time()
+            plan_run = portia_instance.run(query)
+            execution_time = time.time() - start_time
+            
+            logger.info(f"⏱️ {model_name} query executed in {execution_time:.2f} seconds")
+            logger.info(f"📋 Plan Run ID: {plan_run.id}")
+            logger.info(f"📊 Final State: {plan_run.state}")
+            
+            # Extract result based on available attributes
+            result_data = {"plan_run_id": plan_run.id, "state": plan_run.state}
+            
+            if hasattr(plan_run, 'outputs') and plan_run.outputs:
+                if hasattr(plan_run.outputs, 'final_output') and plan_run.outputs.final_output:
+                    result_data["final_output"] = plan_run.outputs.final_output.value
+                    result_data["output_type"] = plan_run.outputs.final_output.type
+                if hasattr(plan_run.outputs, 'execution_outputs') and plan_run.outputs.execution_outputs:
+                    result_data["execution_outputs"] = [
+                        {
+                            "value": output.value,
+                            "type": output.type
+                        }
+                        for output in plan_run.outputs.execution_outputs
+                    ]
+            
+            return {
+                "success": True,
+                "result": result_data,
+                "execution_time": execution_time
+            }
+            
+        except Exception as e:
+            error_msg = str(e)
+            logger.warning(f"❌ {model_name} attempt {attempt + 1} failed: {error_msg}")
+            
+            if attempt == max_retries - 1:
+                return {
+                    "success": False,
+                    "error": f"{model_name} failed after {max_retries} attempts. Last error: {error_msg}",
+                    "execution_time": None
+                }
+            
+            # Exponential backoff
+            delay = base_delay * (2 ** attempt)
+            logger.info(f"⏳ Waiting {delay:.1f}s before retry...")
+            await asyncio.sleep(delay)
+
+async def execute_mistral_fallback(query: str) -> Dict[str, Any]:
+    """Execute query using direct Mistral API as final fallback"""
+    try:
+        if not mistral_client:
+            return {
+                "success": False,
+                "error": "Mistral client not available",
+                "execution_time": None
+            }
+        
+        logger.info("🔄 Using Mistral direct API as final fallback...")
+        start_time = time.time()
+        
+        response = mistral_client.chat.complete(
+            model="mistral-small-latest",
+            messages=[{"role": "user", "content": query}],
+            temperature=0.7,
+            max_tokens=1024
+        )
+        
+        execution_time = time.time() - start_time
+        
+        return {
+            "success": True,
+            "result": {
+                "final_output": response.choices[0].message.content,
+                "output_type": "text",
+                "model": "mistral-small-latest",
+                "usage": response.usage.__dict__ if hasattr(response, 'usage') else None
+            },
+            "execution_time": execution_time
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Mistral fallback failed: {str(e)}",
+            "execution_time": None
+        }
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
-    """Enhanced health check"""
-    mistral_configured = bool(os.getenv('MISTRAL_API_KEY'))
-    openai_configured = bool(os.getenv('OPENAI_API_KEY'))
-    portia_mistral_ok = portia_mistral is not None
-    portia_openai_ok = portia_openai is not None
-    
-    status = "healthy"
-    if not portia_mistral_ok and not portia_openai_ok:
-        status = "degraded"
-    elif not portia_mistral_ok:
-        status = "fallback_mode"
-    
+    """Health check endpoint"""
     return HealthResponse(
-        status=status,
-        portia_mistral_configured=portia_mistral_ok,
-        portia_openai_configured=portia_openai_ok,
-        mistral_configured=mistral_configured,
-        openai_configured=openai_configured,
-        environment=os.getenv('ENVIRONMENT', 'development')
+        status="healthy",
+        portia_gemini_configured=bool(portia_gemini),
+        portia_mistral_configured=bool(portia_mistral),
+        mistral_configured=bool(mistral_client),
+        google_configured=bool(GOOGLE_API_KEY),
+        environment=os.getenv("ENVIRONMENT", "development")
     )
+
+@app.post("/query", response_model=QueryResponse)
+async def query_ai(request: QueryRequest, background_tasks: BackgroundTasks):
+    """
+    Process AI query with intelligent model selection and fallback
+    Priority: Google Gemini -> Mistral Portia -> Mistral Direct
+    """
+    start_time = time.time()
+    
+    try:
+        logger.info(f"🔍 Processing query: {request.query[:100]}...")
+        logger.info(f"👤 User: {request.user_id}, Session: {request.session_id}")
+        logger.info(f"🎯 Model preference: {request.model_preference}")
+        
+        # Determine execution strategy based on preference and availability
+        if request.model_preference == "gemini" and portia_gemini:
+            logger.info("🤖 Using Google Gemini (Primary)")
+            result = await execute_with_retry(portia_gemini, request.query, "Gemini")
+            model_used = "gemini-1.5-pro"
+            
+        elif request.model_preference == "mistral" and portia_mistral:
+            logger.info("📝 Using Mistral Portia (Requested)")
+            result = await execute_with_retry(portia_mistral, request.query, "Mistral")
+            model_used = "mistral-portia"
+            
+        else:
+            # Auto fallback logic: Gemini -> Mistral Portia -> Mistral Direct
+            logger.info("🎯 Auto model selection...")
+            
+            # Try Gemini first
+            if portia_gemini:
+                logger.info("🤖 Trying Google Gemini...")
+                result = await execute_with_retry(portia_gemini, request.query, "Gemini", max_retries=2)
+                model_used = "gemini-1.5-pro"
+                
+                if not result["success"]:
+                    logger.info("📝 Gemini failed, trying Mistral Portia...")
+                    if portia_mistral:
+                        result = await execute_with_retry(portia_mistral, request.query, "Mistral", max_retries=2)
+                        model_used = "mistral-portia"
+                        
+                        if not result["success"]:
+                            logger.info("🚨 Portia failed, using Mistral direct...")
+                            result = await execute_mistral_fallback(request.query)
+                            model_used = "mistral-direct"
+                    else:
+                        logger.info("🚨 Using Mistral direct fallback...")
+                        result = await execute_mistral_fallback(request.query)
+                        model_used = "mistral-direct"
+                        
+            elif portia_mistral:
+                logger.info("📝 Using Mistral Portia...")
+                result = await execute_with_retry(portia_mistral, request.query, "Mistral")
+                model_used = "mistral-portia"
+                
+                if not result["success"]:
+                    logger.info("🚨 Fallback to Mistral direct...")
+                    result = await execute_mistral_fallback(request.query)
+                    model_used = "mistral-direct"
+                    
+            else:
+                logger.info("🚨 Using Mistral direct (only option)...")
+                result = await execute_mistral_fallback(request.query)
+                model_used = "mistral-direct"
+        
+        total_time = time.time() - start_time
+        
+        if result["success"]:
+            logger.info(f"✅ Query completed successfully with {model_used}")
+            logger.info(f"⏱️ Total execution time: {total_time:.2f}s")
+            
+            return QueryResponse(
+                success=True,
+                plan_run_id=result["result"].get("plan_run_id") if result.get("result") else None,
+                result=result["result"],
+                execution_time_seconds=total_time,
+                model_used=model_used
+            )
+        else:
+            logger.error(f"❌ All models failed: {result['error']}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"AI processing failed: {result['error']}"
+            )
+            
+    except Exception as e:
+        total_time = time.time() - start_time
+        error_msg = f"Unexpected error: {str(e)}"
+        logger.error(f"💥 {error_msg}")
+        
+        return QueryResponse(
+            success=False,
+            error=error_msg,
+            execution_time_seconds=total_time,
+            model_used="none"
+        )
 
 @app.get("/")
 async def root():
     """Root endpoint"""
     return {
-        "message": "Enhanced Nexus AI Backend with Robust Error Handling",
-        "version": "2.0.0",
-        "status": "operational",
-        "docs": "/docs",
-        "available_providers": [
-            "mistral" if portia_mistral else None,
-            "openai" if portia_openai else None
+        "message": "Nexus AI Backend with Google Gemini Integration",
+        "version": "3.0.0",
+        "status": "running",
+        "primary_model": "Google Gemini 1.5 Pro",
+        "models_available": {
+            "gemini_1_5_pro": bool(portia_gemini),
+            "mistral_portia": bool(portia_mistral),
+            "mistral_direct": bool(mistral_client)
+        },
+        "fallback_chain": [
+            "Google Gemini 1.5 Pro (Primary)",
+            "Mistral Portia (Secondary)",
+            "Mistral Direct API (Final)"
         ]
     }
 
-def execute_with_retry(portia_client: Portia, query: str, max_retries: int = 2) -> Dict[str, Any]:
-    """Execute query with retry logic for rate limits"""
-    for attempt in range(max_retries + 1):
-        try:
-            start_time = time.time()
-            plan_run = portia_client.run(query)
-            execution_time = time.time() - start_time
-            
-            return {
-                "success": True,
-                "plan_run": plan_run,
-                "execution_time": execution_time
-            }
-            
-        except Exception as e:
-            error_str = str(e)
-            
-            # Check if it's a rate limit error
-            if "429" in error_str or "capacity exceeded" in error_str.lower():
-                if attempt < max_retries:
-                    wait_time = (2 ** attempt) * 5  # Exponential backoff
-                    print(f"   Rate limit hit, waiting {wait_time}s before retry {attempt + 1}")
-                    time.sleep(wait_time)
-                    continue
-            
-            # If not rate limit or max retries exceeded, return error
-            return {
-                "success": False,
-                "error": error_str,
-                "execution_time": time.time() - start_time if 'start_time' in locals() else None
-            }
-    
-    return {"success": False, "error": "Max retries exceeded"}
-
-@app.post("/api/query", response_model=QueryResponse)
-async def process_query(request: QueryRequest):
-    """Process AI queries with fallback and retry logic"""
-    if not request.query.strip():
-        raise HTTPException(status_code=400, detail="Query cannot be empty")
-    
-    print(f"🤖 Processing query: {request.query[:100]}...")
-    
-    # Determine which provider to use
-    model_used = None
-    result = None
-    
-    # Try Mistral first (unless specifically requesting OpenAI)
-    if request.model_preference != "openai" and portia_mistral:
-        print("   Attempting with Mistral AI...")
-        result = execute_with_retry(portia_mistral, request.query)
-        model_used = "mistral"
-        
-        if result["success"]:
-            print(f"✅ Mistral successful in {result['execution_time']:.2f}s")
-        else:
-            print(f"❌ Mistral failed: {result['error'][:100]}...")
-    
-    # Fallback to OpenAI if Mistral failed or was specifically requested
-    if (not result or not result["success"]) and portia_openai and request.model_preference != "mistral":
-        print("   Falling back to OpenAI...")
-        result = execute_with_retry(portia_openai, request.query)
-        model_used = "openai" if not model_used else f"{model_used}->openai"
-        
-        if result["success"]:
-            print(f"✅ OpenAI fallback successful in {result['execution_time']:.2f}s")
-        else:
-            print(f"❌ OpenAI fallback also failed: {result['error'][:100]}...")
-    
-    if not result or not result["success"]:
-        error_msg = result.get("error", "No AI providers available") if result else "No AI providers available"
-        
-        return QueryResponse(
-            success=False,
-            error=error_msg,
-            model_used=model_used,
-            execution_time_seconds=result.get("execution_time") if result else None
-        )
-    
-    # Success - extract results
-    plan_run = result["plan_run"]
-    response_data = {
-        "plan_run_id": plan_run.id,
-        "plan_id": plan_run.plan_id,
-        "state": plan_run.state,
-        "current_step_index": plan_run.current_step_index,
-        "final_output": {
-            "value": plan_run.outputs.final_output.value,
-            "summary": plan_run.outputs.final_output.summary
-        },
-        "step_outputs": {
-            key: {
-                "value": value.value,
-                "summary": value.summary
-            } for key, value in plan_run.outputs.step_outputs.items()
-        },
-        "clarifications": plan_run.outputs.clarifications
-    }
-    
-    return QueryResponse(
-        success=True,
-        plan_run_id=plan_run.id,
-        result=response_data,
-        execution_time_seconds=result["execution_time"],
-        model_used=model_used
-    )
-
-@app.get("/api/status")
-async def get_status():
-    """Get detailed status information"""
-    return {
-        "providers": {
-            "mistral": {
-                "available": portia_mistral is not None,
-                "model": "mistral-small-latest",
-                "api_key_set": bool(os.getenv('MISTRAL_API_KEY'))
-            },
-            "openai": {
-                "available": portia_openai is not None,
-                "model": "gpt-4o-mini",
-                "api_key_set": bool(os.getenv('OPENAI_API_KEY'))
-            }
-        },
-        "environment": {
-            "portia_api_key": bool(os.getenv('PORTIA_API_KEY')),
-            "tavily_api_key": bool(os.getenv('TAVILY_API_KEY')),
-        },
-        "server": {
-            "environment": os.getenv('ENVIRONMENT', 'development'),
-            "port": 8000,
-            "version": "2.0.0"
-        }
-    }
-
 if __name__ == "__main__":
-    # Configuration
-    host = os.getenv('HOST', '0.0.0.0')
-    port = int(os.getenv('PORT', '8000'))
-    debug = os.getenv('ENVIRONMENT', 'development') == 'development'
-    
-    print(f"🚀 Starting Enhanced Nexus AI Backend on {host}:{port}")
-    print(f"   Debug Mode: {debug}")
-    print(f"   Environment: {os.getenv('ENVIRONMENT', 'development')}")
-    print(f"   API Documentation: http://{host}:{port}/docs")
-    
-    # Run the server
+    logger.info("🚀 Starting Nexus AI Backend with Google Gemini...")
     uvicorn.run(
-        "main:app",  # Changed from main_robust:app to main:app
-        host=host,
-        port=port,
-        reload=debug,
-        log_level="info" if not debug else "debug",
-        access_log=True
+        "main:app",
+        host="127.0.0.1",
+        port=8000,
+        reload=True,
+        log_level="info"
     )

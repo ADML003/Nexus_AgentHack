@@ -46,9 +46,9 @@ The backend is now streamlined with one powerful main.py file! 🚀
 ```bash
 # Backend API Configuration
 NEXT_PUBLIC_API_URL=http://localhost:8000
-MISTRAL_API_KEY=oCpTNWjhQ5UF6S68O0Zhqxz9jH6vKiyZ
-PORTIA_API_KEY=prt-eJShsZIu.GRwmyhlUSQ9pZqDOlWtgXeH8NQcp2zlW
-TAVILY_API_KEY=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
+MISTRAL_API_KEY=your-mistral-api-key-here
+PORTIA_API_KEY=your-portia-api-key-here
+TAVILY_API_KEY=your-tavily-api-key-here
 
 # GitHub OAuth Configuration
 GITHUB_CLIENT_SECRET=your_github_client_secret_here

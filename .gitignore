@@ -102,3 +102,6 @@ logs/
 # Backup files
 *.bak
 *.backup
+
+# Cleanup and temporary documentation
+backend/CLEANUP_SUMMARY.md
