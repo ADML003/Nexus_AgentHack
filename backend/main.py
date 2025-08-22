@@ -26,6 +26,9 @@ from portia import (
     StorageClass,
     LogLevel,
     example_tool_registry,
+    open_source_tool_registry,
+    PortiaToolRegistry,
+    McpToolRegistry,
 )
 
 # Import Gemini integration
@@ -79,6 +82,86 @@ class HealthResponse(BaseModel):
     google_configured: bool
     environment: str
 
+def create_enhanced_tool_registry():
+    """Create a comprehensive tool registry with all available Portia tools"""
+    logger.info("🔧 Creating enhanced tool registry with all available tools...")
+    
+    # Start with open source tools (10 tools available)
+    all_tools = list(open_source_tool_registry.get_tools())
+    logger.info(f"✅ Starting with {len(all_tools)} open source tools")
+    
+    # Try to add Portia Cloud tools if API key is available
+    if PORTIA_API_KEY:
+        try:
+            logger.info("🌐 Setting up Portia Cloud tools...")
+            
+            # Create a temporary config for cloud tools registry
+            temp_config = Config.from_default(
+                llm_provider=LLMProvider.MISTRALAI,
+                default_model='mistralai/mistral-small-latest',
+                mistralai_api_key=MISTRAL_API_KEY,
+                portia_api_key=PORTIA_API_KEY,
+                storage_class='MEMORY'
+            )
+            
+            # Initialize cloud registry with config
+            cloud_registry = PortiaToolRegistry(config=temp_config)
+            
+            # Get available cloud tools
+            cloud_tools = cloud_registry.get_tools()
+            logger.info(f"✅ Found {len(cloud_tools)} Portia Cloud tools")
+            
+            # Add cloud tools to our list
+            for tool in cloud_tools:
+                # Check if tool already exists (by name)
+                if not any(t.name == tool.name for t in all_tools):
+                    all_tools.append(tool)
+                    logger.info(f"  + Added cloud tool: {tool.name[:50]}...")
+                else:
+                    logger.info(f"  - Skipped duplicate tool: {tool.name}")
+                
+        except Exception as e:
+            logger.warning(f"⚠️  Failed to load Portia Cloud tools: {str(e)}")
+            logger.info("   Continuing with open source tools only")
+    
+    # Try to add MCP tools
+    try:
+        logger.info("🔗 Setting up MCP tools...")
+        mcp_registry = McpToolRegistry()
+        mcp_tools = mcp_registry.get_tools()
+        
+        if mcp_tools:
+            logger.info(f"✅ Found {len(mcp_tools)} MCP tools")
+            for tool in mcp_tools:
+                if not any(t.name == tool.name for t in all_tools):
+                    all_tools.append(tool)
+                    logger.info(f"  + Added MCP tool: {tool.name}")
+        else:
+            logger.info("ℹ️  No MCP tools currently configured")
+            
+    except Exception as e:
+        logger.warning(f"⚠️  Failed to load MCP tools: {str(e)}")
+    
+    # Create final registry with all tools
+    try:
+        final_registry = open_source_tool_registry
+        for tool in all_tools[len(open_source_tool_registry.get_tools()):]:  # Skip already included open source tools
+            final_registry = final_registry.with_tool(tool)
+            
+        final_tools = final_registry.get_tools()
+        logger.info(f"🎯 Enhanced tool registry created with {len(final_tools)} total tools:")
+        
+        for i, tool in enumerate(final_tools):
+            tool_type = "🌐 Cloud" if "portia:" in tool.name else "🔧 Open Source"
+            logger.info(f"  {i+1:2d}. {tool_type} - {tool.name}")
+        
+        return final_registry
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to create final registry: {e}")
+        logger.info("   Falling back to open source tools only")
+        return open_source_tool_registry
+
 def setup_gemini_portia() -> Optional[Portia]:
     """Setup Portia with Google Gemini as primary model"""
     try:
@@ -99,7 +182,10 @@ def setup_gemini_portia() -> Optional[Portia]:
             default_log_level=LogLevel.INFO,
         )
         
-        portia = Portia(config=config, tools=example_tool_registry)
+        # Create enhanced tool registry
+        enhanced_tools = create_enhanced_tool_registry()
+        
+        portia = Portia(config=config, tools=enhanced_tools)
         logger.info("✅ Gemini Portia configured successfully")
         return portia
         
@@ -128,7 +214,10 @@ def setup_mistral_portia() -> Optional[Portia]:
             default_log_level=LogLevel.INFO,
         )
         
-        portia = Portia(config=config, tools=example_tool_registry)
+        # Create enhanced tool registry
+        enhanced_tools = create_enhanced_tool_registry()
+        
+        portia = Portia(config=config, tools=enhanced_tools)
         logger.info("✅ Mistral Portia configured successfully")
         return portia
         
@@ -310,6 +399,40 @@ async def health_check():
         google_configured=bool(GOOGLE_API_KEY),
         environment=os.getenv("ENVIRONMENT", "development")
     )
+
+@app.get("/tools")
+async def list_available_tools():
+    """List all available tools in the enhanced registry"""
+    try:
+        enhanced_registry = create_enhanced_tool_registry()
+        tools = enhanced_registry.get_tools()
+        
+        tools_info = []
+        for i, tool in enumerate(tools):
+            tool_info = {
+                "id": i + 1,
+                "name": tool.name,
+                "class": tool.__class__.__name__,
+                "type": "Cloud" if hasattr(tool, '_is_cloud_tool') else "Open Source",
+                "description": getattr(tool, 'description', 'No description available')
+            }
+            tools_info.append(tool_info)
+        
+        return {
+            "success": True,
+            "total_tools": len(tools_info),
+            "open_source_count": len([t for t in tools_info if t["type"] == "Open Source"]),
+            "cloud_count": len([t for t in tools_info if t["type"] == "Cloud"]),
+            "portia_api_key_configured": bool(PORTIA_API_KEY),
+            "tools": tools_info
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Failed to retrieve tools: {str(e)}",
+            "tools": []
+        }
 
 @app.post("/query", response_model=QueryResponse)
 async def query_ai(request: QueryRequest, background_tasks: BackgroundTasks):
