@@ -105,3 +105,15 @@ logs/
 
 # Cleanup and temporary documentation
 backend/CLEANUP_SUMMARY.md
+
+# Redundant backend files (development artifacts)
+backend/main_*.py
+backend/deepseek_*.py
+backend/*_demo.py
+backend/simple_*.py
+backend/robust_*.py
+backend/test_deepseek_*.py
+backend/test_gemini_*.py
+backend/test_portia*.py
+backend/test_with_*.py
+backend/verify_*.py

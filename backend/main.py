@@ -31,8 +31,7 @@ from portia import (
     McpToolRegistry,
 )
 
-# Import Gemini integration
-from gemini_model import GeminiModel, create_gemini_config
+# Import Gemini integration - REMOVED: Using Portia's native Google support
 
 # Load environment variables
 load_dotenv("../.env.local")
@@ -163,30 +162,29 @@ def create_enhanced_tool_registry():
         return open_source_tool_registry
 
 def setup_gemini_portia() -> Optional[Portia]:
-    """Setup Portia with Google Gemini as primary model"""
+    """Setup Portia with Google Gemini as primary model using native support"""
     try:
         if not GOOGLE_API_KEY:
             logger.warning("Google API key not found")
             return None
         
-        logger.info("🤖 Setting up Portia with Google Gemini 1.5 Pro...")
+        logger.info("🤖 Setting up Portia with Google Gemini 1.5 Pro (native support)...")
         
-        # Create Gemini configuration
-        config = create_gemini_config(
-            api_key=GOOGLE_API_KEY,
-            model_name="gemini-1.5-pro",
-            temperature=0.7,
-            max_tokens=2048,
+        # Create Gemini configuration using Portia's native Google support
+        config = Config.from_default(
+            llm_provider=LLMProvider.GOOGLE,
+            google_api_key=GOOGLE_API_KEY,
             storage_class=StorageClass.CLOUD if PORTIA_API_KEY else StorageClass.DISK,
             storage_dir='nexus_runs_gemini' if not PORTIA_API_KEY else None,
             default_log_level=LogLevel.INFO,
+            portia_api_key=PORTIA_API_KEY
         )
         
         # Create enhanced tool registry
         enhanced_tools = create_enhanced_tool_registry()
         
         portia = Portia(config=config, tools=enhanced_tools)
-        logger.info("✅ Gemini Portia configured successfully")
+        logger.info("✅ Gemini Portia configured successfully with native support")
         return portia
         
     except Exception as e:
@@ -556,6 +554,6 @@ if __name__ == "__main__":
         "main:app",
         host="127.0.0.1",
         port=8000,
-        reload=True,
+        reload=False,  # Disable reload to avoid dependency conflicts
         log_level="info"
     )
