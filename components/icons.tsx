@@ -283,3 +283,27 @@ export const UserIcon: React.FC<IconSvgProps> = ({
     <circle cx="12" cy="7" r="4" />
   </svg>
 );
+
+export const BrowserAutomationIcon: React.FC<IconSvgProps> = ({
+  size = 24,
+  width,
+  height,
+  ...props
+}) => (
+  <svg
+    fill="none"
+    height={size || height}
+    stroke="currentColor"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    strokeWidth="2"
+    viewBox="0 0 24 24"
+    width={size || width}
+    {...props}
+  >
+    <rect width="18" height="11" x="3" y="4" rx="2" ry="2" />
+    <circle cx="8" cy="9" r="1" />
+    <path d="m15.5 7.5 3 3-3 3M14 11h7" />
+    <path d="M3 7h3" />
+  </svg>
+);

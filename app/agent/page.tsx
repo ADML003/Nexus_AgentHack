@@ -1,13 +1,19 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Button } from "@nextui-org/button";
 import { Input } from "@nextui-org/input";
 import { Card, CardBody } from "@nextui-org/card";
 import { Avatar } from "@nextui-org/avatar";
 import { Chip } from "@nextui-org/chip";
+import { Spinner } from "@nextui-org/spinner";
 import { title } from "@/components/primitives";
-import { SendIcon, BotIcon, UserIcon } from "@/components/icons";
+import {
+  SendIcon,
+  BotIcon,
+  UserIcon,
+  BrowserAutomationIcon,
+} from "@/components/icons";
 
 interface Message {
   id: string;
@@ -16,84 +22,8 @@ interface Message {
   timestamp: Date;
 }
 
-interface AppIntegration {
-  name: string;
-  icon: string;
-  color: string;
-  description: string;
-}
-
-const appIntegrations: AppIntegration[] = [
-  {
-    name: "Gmail",
-    icon: "gmail",
-    color: "bg-red-500",
-    description: "Email management",
-  },
-  {
-    name: "Google Docs",
-    icon: "docs",
-    color: "bg-blue-500",
-    description: "Document editing",
-  },
-  {
-    name: "Google Sheets",
-    icon: "sheets",
-    color: "bg-green-500",
-    description: "Spreadsheet analysis",
-  },
-  {
-    name: "Google Drive",
-    icon: "drive",
-    color: "bg-yellow-500",
-    description: "File storage & sharing",
-  },
-  {
-    name: "Google Calendar",
-    icon: "calendar",
-    color: "bg-blue-600",
-    description: "Schedule management",
-  },
-  {
-    name: "Notion",
-    icon: "notion",
-    color: "bg-gray-800",
-    description: "All-in-one workspace",
-  },
-  {
-    name: "GitHub",
-    icon: "github",
-    color: "bg-gray-900",
-    description: "Code repositories",
-  },
-  {
-    name: "LinkedIn",
-    icon: "linkedin",
-    color: "bg-blue-600",
-    description: "Professional network",
-  },
-  {
-    name: "Outlook",
-    icon: "outlook",
-    color: "bg-blue-500",
-    description: "Email & calendar",
-  },
-  {
-    name: "Chrome",
-    icon: "chrome",
-    color: "bg-yellow-400",
-    description: "Web browser",
-  },
-  {
-    name: "Safari",
-    icon: "safari",
-    color: "bg-blue-400",
-    description: "Web browser",
-  },
-];
-
-// Component to handle timestamp rendering without hydration issues
-const MessageTime = ({ timestamp }: { timestamp: Date }) => {
+// Hydration-safe timestamp component
+const MessageTime: React.FC<{ timestamp: Date }> = ({ timestamp }) => {
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -101,168 +31,73 @@ const MessageTime = ({ timestamp }: { timestamp: Date }) => {
   }, []);
 
   if (!mounted) {
-    return <span className="text-xs opacity-70">--:--</span>;
+    return <span className="text-xs text-gray-400">--:--</span>;
   }
 
   return (
-    <span className="text-xs opacity-70">
-      {timestamp.toLocaleTimeString("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-      })}
+    <span className="text-xs text-gray-400">
+      {timestamp.toLocaleTimeString()}
     </span>
   );
-};
-
-// Component to render app icons
-const AppIcon = ({
-  iconType,
-  className = "",
-}: {
-  iconType: string;
-  className?: string;
-}) => {
-  const iconClass = `w-8 h-8 ${className}`;
-
-  switch (iconType) {
-    case "gmail":
-      return (
-        <div
-          className={`${iconClass} bg-gradient-to-br from-red-400 to-red-600 rounded-lg flex items-center justify-center shadow-sm`}
-        >
-          <span className="text-white text-lg font-bold">M</span>
-        </div>
-      );
-    case "docs":
-      return (
-        <div
-          className={`${iconClass} bg-gradient-to-br from-blue-400 to-blue-600 rounded-lg flex items-center justify-center shadow-sm`}
-        >
-          <span className="text-white text-lg">📄</span>
-        </div>
-      );
-    case "sheets":
-      return (
-        <div
-          className={`${iconClass} bg-gradient-to-br from-green-400 to-green-600 rounded-lg flex items-center justify-center shadow-sm`}
-        >
-          <span className="text-white text-lg">📊</span>
-        </div>
-      );
-    case "drive":
-      return (
-        <div
-          className={`${iconClass} bg-gradient-to-br from-yellow-400 to-orange-500 rounded-lg flex items-center justify-center shadow-sm`}
-        >
-          <span className="text-white text-lg">📁</span>
-        </div>
-      );
-    case "calendar":
-      return (
-        <div
-          className={`${iconClass} bg-gradient-to-br from-blue-500 to-blue-700 rounded-lg flex items-center justify-center shadow-sm`}
-        >
-          <span className="text-white text-lg">📅</span>
-        </div>
-      );
-    case "notion":
-      return (
-        <div
-          className={`${iconClass} bg-gradient-to-br from-gray-700 to-black rounded-lg flex items-center justify-center shadow-sm`}
-        >
-          <span className="text-white text-lg font-bold">⚡</span>
-        </div>
-      );
-    case "github":
-      return (
-        <div
-          className={`${iconClass} bg-gradient-to-br from-gray-800 to-black rounded-lg flex items-center justify-center shadow-sm`}
-        >
-          <span className="text-white text-lg">🐙</span>
-        </div>
-      );
-    case "linkedin":
-      return (
-        <div
-          className={`${iconClass} bg-gradient-to-br from-blue-500 to-blue-700 rounded-lg flex items-center justify-center shadow-sm`}
-        >
-          <span className="text-white text-sm font-bold">in</span>
-        </div>
-      );
-    case "outlook":
-      return (
-        <div
-          className={`${iconClass} bg-gradient-to-br from-blue-500 to-blue-700 rounded-lg flex items-center justify-center shadow-sm`}
-        >
-          <span className="text-white text-lg font-bold">📧</span>
-        </div>
-      );
-    case "chrome":
-      return (
-        <div
-          className={`${iconClass} bg-gradient-to-br from-red-400 to-blue-400 rounded-full flex items-center justify-center shadow-sm p-1`}
-        >
-          <div className="w-4 h-4 bg-blue-500 rounded-full border border-white"></div>
-        </div>
-      );
-    case "safari":
-      return (
-        <div
-          className={`${iconClass} bg-gradient-to-br from-blue-400 to-blue-600 rounded-full flex items-center justify-center shadow-sm`}
-        >
-          <span className="text-white text-lg">🧭</span>
-        </div>
-      );
-    default:
-      return (
-        <div
-          className={`${iconClass} bg-gray-400 rounded-lg flex items-center justify-center shadow-sm`}
-        >
-          <span className="text-white text-sm">?</span>
-        </div>
-      );
-  }
 };
 
 export default function AgentPage() {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
-      content: "Hello! I'm your AI assistant. How can I help you today?",
+      content: "Hello! I'm your AI agent. How can I help you today?",
       sender: "bot",
       timestamp: new Date(),
     },
   ]);
-  const [inputMessage, setInputMessage] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [connectedApps, setConnectedApps] = useState<string[]>([]);
+  const [inputValue, setInputValue] = useState("");
+  const [isTyping, setIsTyping] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   const handleSendMessage = async () => {
-    if (!inputMessage.trim()) return;
+    if (!inputValue.trim()) return;
 
-    const newMessage: Message = {
+    const userMessage: Message = {
       id: Date.now().toString(),
-      content: inputMessage,
+      content: inputValue,
       sender: "user",
       timestamp: new Date(),
     };
 
-    setMessages((prev) => [...prev, newMessage]);
-    setInputMessage("");
-    setIsLoading(true);
+    setMessages((prev) => [...prev, userMessage]);
+    setInputValue("");
+    setIsTyping(true);
 
     // Simulate AI response
     setTimeout(() => {
-      const botResponse: Message = {
+      const botMessage: Message = {
         id: (Date.now() + 1).toString(),
-        content: `I understand you said: "${inputMessage}". How can I assist you further with your tasks?`,
+        content: "I understand your request. Let me help you with that.",
         sender: "bot",
         timestamp: new Date(),
       };
-      setMessages((prev) => [...prev, botResponse]);
-      setIsLoading(false);
-    }, 1000);
+      setMessages((prev) => [...prev, botMessage]);
+      setIsTyping(false);
+    }, 2000);
+  };
+
+  const handleBrowserAutomation = () => {
+    const automationMessage: Message = {
+      id: Date.now().toString(),
+      content:
+        "I'll help you automate browser tasks. What would you like me to do?",
+      sender: "bot",
+      timestamp: new Date(),
+    };
+    setMessages((prev) => [...prev, automationMessage]);
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -273,207 +108,154 @@ export default function AgentPage() {
   };
 
   const quickActions = [
-    "Help me compose an email in Gmail",
-    "Create a new Google Doc",
-    "Schedule a meeting in Calendar",
-    "Organize files in Drive",
-    "Update my LinkedIn profile",
+    "Help me automate this webpage",
+    "Extract data from this page",
+    "Fill out this form automatically",
+    "Monitor for changes on this site",
+    "Click through this workflow",
   ];
 
   const handleQuickAction = (action: string) => {
-    setInputMessage(action);
-  };
-
-  const handleAppConnect = (appName: string) => {
-    if (connectedApps.includes(appName)) {
-      setConnectedApps((prev) => prev.filter((app) => app !== appName));
-    } else {
-      setConnectedApps((prev) => [...prev, appName]);
-    }
+    setInputValue(action);
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background to-default-50 p-4 md:p-6">
-      <div className="max-w-6xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <h1 className={title({ size: "lg" })}>AI Agent Dashboard</h1>
-          <p className="text-gray-500 mt-2">
-            Chat with your AI assistant and integrate with your favorite apps
-          </p>
+    <div className="flex flex-col min-h-screen">
+      {/* Header */}
+      <div className="flex items-center justify-between p-4 border-b border-divider">
+        <div>
+          <h1 className={title({ color: "blue" })}>AI Agent Dashboard</h1>
+          <p className="text-default-500 mt-1">Welcome to your AI Assistant</p>
         </div>
+        <div className="flex items-center gap-3">
+          <Button
+            color="primary"
+            variant="flat"
+            startContent={<BrowserAutomationIcon />}
+            onPress={handleBrowserAutomation}
+          >
+            Browser Automation
+          </Button>
+        </div>
+      </div>
 
-        {/* Chat Section */}
-        <div className="mb-12">
-          <Card className="w-full max-w-4xl mx-auto">
-            <CardBody className="p-0">
-              {/* Chat Messages */}
-              <div className="h-96 overflow-y-auto p-4 space-y-4">
-                {messages.map((message) => (
+      {/* Chat Container */}
+      <div className="flex-1 flex flex-col max-w-4xl mx-auto w-full p-4">
+        <Card className="flex-1 flex flex-col">
+          <CardBody className="flex-1 flex flex-col p-0">
+            {/* Messages Area */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              {messages.map((message) => (
+                <div
+                  key={message.id}
+                  className={`flex items-start gap-3 ${
+                    message.sender === "user" ? "flex-row-reverse" : "flex-row"
+                  }`}
+                >
+                  <Avatar
+                    icon={
+                      message.sender === "user" ? <UserIcon /> : <BotIcon />
+                    }
+                    className="flex-shrink-0"
+                    color={message.sender === "user" ? "primary" : "secondary"}
+                    size="sm"
+                  />
                   <div
-                    key={message.id}
-                    className={`flex items-start gap-3 ${
-                      message.sender === "user" ? "flex-row-reverse" : ""
+                    className={`flex flex-col gap-1 ${
+                      message.sender === "user" ? "items-end" : "items-start"
                     }`}
                   >
-                    <Avatar
-                      icon={
-                        message.sender === "user" ? <UserIcon /> : <BotIcon />
-                      }
-                      className={`flex-shrink-0 ${
-                        message.sender === "user"
-                          ? "bg-primary text-white"
-                          : "bg-secondary text-gray-700"
-                      }`}
-                      size="sm"
-                    />
                     <div
-                      className={`max-w-[70%] p-3 rounded-lg ${
+                      className={`p-3 rounded-2xl max-w-xs lg:max-w-md xl:max-w-lg ${
                         message.sender === "user"
-                          ? "bg-primary text-white ml-auto"
-                          : "bg-default-100 text-foreground"
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-default-100"
                       }`}
                     >
                       <p className="text-sm">{message.content}</p>
-                      <p className="text-xs opacity-70 mt-1">
-                        <MessageTime timestamp={message.timestamp} />
-                      </p>
                     </div>
-                  </div>
-                ))}
-                {isLoading && (
-                  <div className="flex items-start gap-3">
-                    <Avatar
-                      icon={<BotIcon />}
-                      className="bg-secondary text-gray-700 flex-shrink-0"
-                      size="sm"
-                    />
-                    <div className="bg-default-100 p-3 rounded-lg">
-                      <div className="flex gap-1">
-                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
-                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-100" />
-                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-200" />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Chat Input */}
-              <div className="border-t p-4">
-                {/* Quick Actions */}
-                <div className="mb-3">
-                  <p className="text-xs text-gray-500 mb-2">Quick actions:</p>
-                  <div className="flex flex-wrap gap-2">
-                    {quickActions.map((action) => (
-                      <Chip
-                        key={action}
-                        size="sm"
-                        variant="bordered"
-                        className="cursor-pointer hover:bg-primary hover:text-white transition-colors"
-                        onClick={() => handleQuickAction(action)}
-                      >
-                        {action}
-                      </Chip>
-                    ))}
+                    <MessageTime timestamp={message.timestamp} />
                   </div>
                 </div>
+              ))}
 
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="Type your message here..."
-                    value={inputMessage}
-                    onValueChange={setInputMessage}
-                    onKeyPress={handleKeyPress}
-                    className="flex-1"
-                    disabled={isLoading}
+              {/* Typing Indicator */}
+              {isTyping && (
+                <div className="flex items-start gap-3">
+                  <Avatar
+                    icon={<BotIcon />}
+                    className="flex-shrink-0"
+                    color="secondary"
+                    size="sm"
                   />
-                  <Button
-                    color="primary"
-                    onClick={handleSendMessage}
-                    disabled={!inputMessage.trim() || isLoading}
-                    isIconOnly
-                  >
-                    <SendIcon />
-                  </Button>
+                  <div className="bg-default-100 p-3 rounded-2xl">
+                    <div className="flex space-x-1">
+                      <div className="w-2 h-2 bg-default-400 rounded-full animate-bounce"></div>
+                      <div className="w-2 h-2 bg-default-400 rounded-full animate-bounce [animation-delay:0.1s]"></div>
+                      <div className="w-2 h-2 bg-default-400 rounded-full animate-bounce [animation-delay:0.2s]"></div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Input Area */}
+            <div className="border-t border-divider p-4">
+              {/* Quick Actions */}
+              <div className="mb-3">
+                <p className="text-xs text-gray-500 mb-2">Quick actions:</p>
+                <div className="flex flex-wrap gap-2">
+                  {quickActions.map((action) => (
+                    <Chip
+                      key={action}
+                      size="sm"
+                      variant="bordered"
+                      className="cursor-pointer hover:bg-primary hover:text-white transition-colors"
+                      onClick={() => handleQuickAction(action)}
+                    >
+                      {action}
+                    </Chip>
+                  ))}
                 </div>
               </div>
-            </CardBody>
-          </Card>
-        </div>
 
-        {/* App Integrations Section */}
-        <div className="text-center mb-6">
-          <h2 className="text-2xl font-semibold mb-2">Integrate with</h2>
-          <p className="text-gray-500">
-            Connect your favorite apps to enhance your AI assistant's
-            capabilities
-          </p>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 max-w-5xl mx-auto">
-          {appIntegrations.map((app) => (
-            <Card
-              key={app.name}
-              className={`cursor-pointer hover:scale-105 transition-transform duration-200 hover:shadow-lg ${
-                connectedApps.includes(app.name) ? "ring-2 ring-primary" : ""
-              }`}
-              isPressable
-              onPress={() => handleAppConnect(app.name)}
-            >
-              <CardBody className="p-4 text-center">
-                <div className="flex justify-center mb-3">
-                  <AppIcon iconType={app.icon} />
-                </div>
-                <h3 className="font-semibold text-sm mb-1">{app.name}</h3>
-                <p className="text-xs text-gray-500 line-clamp-2">
-                  {app.description}
-                </p>
-                <Chip
-                  size="sm"
-                  variant="flat"
-                  color={
-                    connectedApps.includes(app.name) ? "success" : "primary"
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Type your message here..."
+                  value={inputValue}
+                  onValueChange={setInputValue}
+                  onKeyDown={handleKeyPress}
+                  endContent={
+                    <Button
+                      isIconOnly
+                      color="primary"
+                      aria-label="Send message"
+                      onPress={handleSendMessage}
+                      isDisabled={!inputValue.trim()}
+                    >
+                      <SendIcon />
+                    </Button>
                   }
-                  className="mt-2"
-                >
-                  {connectedApps.includes(app.name) ? "Connected" : "Connect"}
+                  size="lg"
+                  variant="bordered"
+                  classNames={{
+                    input: "text-sm",
+                    inputWrapper: "pr-1",
+                  }}
+                />
+              </div>
+              <div className="flex items-center justify-center gap-2 mt-3">
+                <Chip variant="dot" size="sm">
+                  Online
                 </Chip>
-              </CardBody>
-            </Card>
-          ))}
-        </div>
-
-        {/* Status Section */}
-        <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto">
-          <Card>
-            <CardBody className="p-6 text-center">
-              <div className="flex items-center justify-center gap-2 mb-2">
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                <span className="text-sm font-medium">AI Assistant Online</span>
-              </div>
-              <p className="text-xs text-gray-500">
-                Ready to help with your tasks
-              </p>
-            </CardBody>
-          </Card>
-
-          <Card>
-            <CardBody className="p-6 text-center">
-              <div className="flex items-center justify-center gap-2 mb-2">
-                <span className="text-lg font-bold text-primary">
-                  {connectedApps.length}
+                <span className="text-xs text-default-400">
+                  AI Agent ready to assist you
                 </span>
-                <span className="text-sm font-medium">Apps Connected</span>
               </div>
-              <p className="text-xs text-gray-500">
-                {connectedApps.length > 0
-                  ? "Ready for integration"
-                  : "Connect apps above"}
-              </p>
-            </CardBody>
-          </Card>
-        </div>
+            </div>
+          </CardBody>
+        </Card>
       </div>
     </div>
   );

@@ -112,7 +112,7 @@ export const Navbar = () => {
             })}
             href="/agent"
           >
-            Dashboard
+            Get Started
           </Button>
         </NavbarItem>
       </NavbarContent>
