@@ -354,7 +354,7 @@ if __name__ == "__main__":
     
     # Run the server
     uvicorn.run(
-        "main:app",  # Changed from main_robust:app to main:app
+        "main_robust:app",
         host=host,
         port=port,
         reload=debug,

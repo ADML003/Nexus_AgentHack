@@ -10,10 +10,10 @@ from portia import (
 load_dotenv('../.env.local')  # Load from parent directory
 MISTRAL_API_KEY = os.getenv('MISTRAL_API_KEY')
 
-# Create a default Portia config with LLM provider set to Mistral AI and the latest Mistral Large model
+# Create a default Portia config with LLM provider set to Mistral AI and a smaller model to avoid capacity limits
 mistral_config = Config.from_default(
     llm_provider=LLMProvider.MISTRALAI,
-    default_model="mistralai/mistral-large-latest",
+    default_model="mistralai/mistral-small-latest",  # Using smaller model to avoid capacity limits
     mistralai_api_key=MISTRAL_API_KEY
 )
 # Instantiate a Portia instance. Load it with the config and with the example tools.

@@ -11,7 +11,7 @@ load_dotenv('../.env.local')
 # Set up Mistral configuration using Config.from_default
 config = Config.from_default(
     llm_provider="mistralai",
-    default_model="mistralai/mistral-large-latest"
+    default_model="mistralai/mistral-small-latest"
 )
 
 # Instantiate Portia with Mistral config and example tools
