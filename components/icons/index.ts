@@ -13,3 +13,4 @@ export * from "./two-tone";
 export * from "./bold";
 export * from "./linear";
 export * from "./bug";
+export * from "./tools";

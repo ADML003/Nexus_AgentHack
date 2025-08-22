@@ -10,7 +10,7 @@ from typing import Optional
 from portia import (
     Portia,
     Config,
-    example_tool_registry,
+    LLMProvider,
 )
 
 # Load environment variables
@@ -37,10 +37,10 @@ security = HTTPBearer()
 
 # Initialize Portia with Mistral
 config = Config.from_default(
-    llm_provider="mistralai",
-    default_model="mistralai/mistral-large-latest"
+    llm_provider=LLMProvider.MISTRALAI,
+    default_model="mistral-large-latest"
 )
-portia_client = Portia(config=config, tools=example_tool_registry)
+portia_client = Portia(config=config)
 
 # Pydantic models
 class QueryRequest(BaseModel):
