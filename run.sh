@@ -15,6 +15,36 @@ fi
 
 echo "✅ Found .env.local file"
 
+# Load environment variables from .env.local
+echo "🔑 Loading environment variables..."
+export $(grep -v '^#' .env.local | xargs)
+
+# Verify key API keys are loaded
+echo "🔍 Checking API keys..."
+if [ -n "$OPENAI_API_KEY" ]; then
+    echo "   ✅ OpenAI API key loaded"
+else
+    echo "   ❌ OpenAI API key missing"
+fi
+
+if [ -n "$GOOGLE_API_KEY" ]; then
+    echo "   ✅ Google API key loaded"
+else
+    echo "   ❌ Google API key missing"
+fi
+
+if [ -n "$MISTRAL_API_KEY" ]; then
+    echo "   ✅ Mistral API key loaded"
+else
+    echo "   ❌ Mistral API key missing"
+fi
+
+if [ -n "$PORTIA_API_KEY" ]; then
+    echo "   ✅ Portia API key loaded"
+else
+    echo "   ❌ Portia API key missing"
+fi
+
 # Activate virtual environment if it exists
 if [ -d ".venv" ]; then
     echo "📦 Activating virtual environment..."
@@ -26,6 +56,6 @@ fi
 # Navigate to backend
 cd backend
 
-# Start the server (API keys will be loaded from .env.local by python-dotenv)
-echo "🌟 Starting server..."
+# Start the server
+echo "🌟 Starting server with loaded environment..."
 python main.py

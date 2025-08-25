@@ -46,6 +46,30 @@ interface ToolRegistry {
   tools: ToolInfo[];
 }
 
+interface ToolRegistryResponse {
+  success: boolean;
+  registries: {
+    open_source: {
+      name: string;
+      available: boolean;
+      tool_count: number;
+      status: string;
+    };
+    cloud: {
+      name: string;
+      available: boolean;
+      tool_count: number;
+      status: string;
+      authenticated: boolean;
+    };
+  };
+  total_tools: number;
+  summary: {
+    registries_active: number;
+    total_registries: number;
+  };
+}
+
 interface QueryResponse {
   success: boolean;
   result?: string;
@@ -72,7 +96,8 @@ export default function EnhancedAgentPage() {
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [selectedRegistry, setSelectedRegistry] = useState("default");
-  const [toolRegistries, setToolRegistries] = useState<ToolRegistry[]>([]);
+  const [toolRegistries, setToolRegistries] =
+    useState<ToolRegistryResponse | null>(null);
   const [selectedTool, setSelectedTool] = useState<string>("");
   const [isLoadingTools, setIsLoadingTools] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -96,14 +121,16 @@ export default function EnhancedAgentPage() {
     try {
       const response = await fetch("http://localhost:8000/tools/registries");
       if (response.ok) {
-        const registries = await response.json();
+        const registries: ToolRegistryResponse = await response.json();
         setToolRegistries(registries);
         console.log("Loaded tool registries:", registries);
       } else {
         console.error("Failed to load tool registries");
+        setToolRegistries(null);
       }
     } catch (error) {
       console.error("Error loading tool registries:", error);
+      setToolRegistries(null);
     }
     setIsLoadingTools(false);
   };
@@ -159,10 +186,6 @@ export default function EnhancedAgentPage() {
         // Try to get the main output from API response using robust extraction
         output =
           data.result ||
-          data.output ||
-          data.result?.text ||
-          data.result?.message ||
-          data.result?.output ||
           (typeof data.result === "object"
             ? JSON.stringify(data.result)
             : "") ||
@@ -174,64 +197,6 @@ export default function EnhancedAgentPage() {
       const botMessage: Message = {
         id: (Date.now() + 1).toString(),
         content: output,
-        sender: "bot",
-        timestamp: new Date(),
-        error: !data.success,
-        toolsUsed: data.tools_used,
-        toolRegistry: data.tool_registry_used,
-        executionTime: data.execution_time_seconds,
-      };
-
-      setMessages((prev) => [...prev, botMessage]);
-    } catch (error) {
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: "Failed to connect to the AI service. Please try again.",
-        sender: "bot",
-        timestamp: new Date(),
-        error: true,
-      };
-
-      setMessages((prev) => [...prev, errorMessage]);
-    }
-
-    setIsLoading(false);
-  };
-
-  const handleToolSpecificQuery = async (toolId: string) => {
-    if (!inputValue.trim() || isLoading) return;
-
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      content: `Using ${toolId}: ${inputValue.trim()}`,
-      sender: "user",
-      timestamp: new Date(),
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
-    setInputValue("");
-    setIsLoading(true);
-
-    try {
-      const response = await fetch("http://localhost:8000/tool-query", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          query: inputValue.trim(),
-          tool_id: toolId,
-          user_id: "demo-user",
-        }),
-      });
-
-      const data: QueryResponse = await response.json();
-
-      const botMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: data.success
-          ? data.result || "No response"
-          : data.error || "Unknown error occurred",
         sender: "bot",
         timestamp: new Date(),
         error: !data.success,
@@ -274,16 +239,17 @@ export default function EnhancedAgentPage() {
       : `${seconds.toFixed(2)}s`;
   };
 
-  const getToolsByCategory = (registry: ToolRegistry) => {
-    const categories: Record<string, ToolInfo[]> = {};
-    registry.tools.forEach((tool) => {
-      if (!categories[tool.category]) {
-        categories[tool.category] = [];
-      }
-      categories[tool.category].push(tool);
-    });
-    return categories;
-  };
+  // Temporarily commented out - function expects old ToolRegistry interface
+  // const getToolsByCategory = (registry: ToolRegistry) => {
+  //   const categories: Record<string, ToolInfo[]> = {};
+  //   registry.tools.forEach((tool) => {
+  //     if (!categories[tool.category]) {
+  //       categories[tool.category] = [];
+  //     }
+  //     categories[tool.category].push(tool);
+  //   });
+  //   return categories;
+  // };
 
   return (
     <div className="flex flex-col h-screen max-w-7xl mx-auto p-4">
@@ -294,9 +260,8 @@ export default function EnhancedAgentPage() {
             AI Agent with Portia Tools
           </h1>
           <p className="text-gray-600 mt-2">
-            Enhanced with{" "}
-            {toolRegistries.reduce((sum, reg) => sum + reg.total_tools, 0)}{" "}
-            tools across {toolRegistries.length} registries
+            Enhanced with {toolRegistries?.total_tools || 0} tools across{" "}
+            {toolRegistries?.summary?.total_registries || 0} registries
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -330,45 +295,57 @@ export default function EnhancedAgentPage() {
               className="max-w-xs"
               size="sm"
             >
-              <SelectItem key="default" value="default">
-                Default Registry (
-                {toolRegistries.find((r) => r.registry_name === "default")
-                  ?.total_tools || 0}{" "}
-                tools)
+              <SelectItem
+                key="default"
+                value="default"
+                textValue="Default Registry"
+              >
+                Default Registry ({toolRegistries?.total_tools || 0} tools)
               </SelectItem>
-              <SelectItem key="open_source" value="open_source">
+              <SelectItem
+                key="open_source"
+                value="open_source"
+                textValue="Open Source Registry"
+              >
                 Open Source (
-                {toolRegistries.find((r) => r.registry_name === "open_source")
-                  ?.total_tools || 0}{" "}
+                {toolRegistries?.registries?.open_source?.tool_count || 0}{" "}
                 tools)
               </SelectItem>
-              <SelectItem key="cloud" value="cloud">
+              <SelectItem
+                key="cloud"
+                value="cloud"
+                textValue="Portia Cloud Registry"
+              >
                 Portia Cloud (
-                {toolRegistries.find((r) => r.registry_name === "cloud")
-                  ?.total_tools || 0}{" "}
-                tools)
+                {toolRegistries?.registries?.cloud?.tool_count || 0} tools)
               </SelectItem>
             </Select>
 
             <div className="flex flex-wrap gap-2">
-              {toolRegistries.map((registry) => (
-                <Chip
-                  key={registry.registry_name}
-                  color={
-                    selectedRegistry === registry.registry_name
-                      ? "primary"
-                      : "default"
-                  }
-                  size="sm"
-                  variant={
-                    selectedRegistry === registry.registry_name
-                      ? "solid"
-                      : "flat"
-                  }
-                >
-                  {registry.registry_name}: {registry.total_tools}
-                </Chip>
-              ))}
+              {toolRegistries && (
+                <>
+                  <Chip
+                    color={
+                      selectedRegistry === "open_source" ? "primary" : "default"
+                    }
+                    size="sm"
+                    variant={
+                      selectedRegistry === "open_source" ? "solid" : "flat"
+                    }
+                  >
+                    Open Source:{" "}
+                    {toolRegistries.registries.open_source.tool_count}
+                  </Chip>
+                  <Chip
+                    color={selectedRegistry === "cloud" ? "primary" : "default"}
+                    size="sm"
+                    variant={selectedRegistry === "cloud" ? "solid" : "flat"}
+                  >
+                    Cloud: {toolRegistries.registries.cloud.tool_count}
+                    {toolRegistries.registries.cloud.available ? " ✅" : " ❌"}
+                  </Chip>
+                </>
+              )}
             </div>
           </div>
         </CardBody>
@@ -387,11 +364,7 @@ export default function EnhancedAgentPage() {
                   </h3>
                   <p className="text-gray-600">
                     Ask me anything. I have access to{" "}
-                    {toolRegistries.reduce(
-                      (sum, reg) => sum + reg.total_tools,
-                      0
-                    )}{" "}
-                    powerful tools.
+                    {toolRegistries?.total_tools || 0} powerful tools.
                   </p>
                   <div className="mt-4 flex flex-wrap justify-center gap-2">
                     <Chip size="sm">Web Search</Chip>
@@ -562,98 +535,78 @@ export default function EnhancedAgentPage() {
             <div>
               <h3 className="text-xl font-bold">Available Tools</h3>
               <p className="text-sm text-gray-600">
-                {toolRegistries.reduce((sum, reg) => sum + reg.total_tools, 0)}{" "}
-                tools across {toolRegistries.length} registries
+                {toolRegistries?.total_tools || 0} tools across{" "}
+                {toolRegistries?.summary?.total_registries || 0} registries
               </p>
             </div>
           </ModalHeader>
           <ModalBody>
-            <Tabs aria-label="Tool Registries">
-              {toolRegistries.map((registry) => {
-                const categorizedTools = getToolsByCategory(registry);
-                return (
-                  <Tab
-                    key={registry.registry_name}
-                    title={
-                      <div className="flex items-center gap-2">
-                        <span className="capitalize">
-                          {registry.registry_name}
-                        </span>
-                        <Chip size="sm" variant="flat">
-                          {registry.total_tools}
-                        </Chip>
-                      </div>
-                    }
-                  >
-                    <div className="space-y-6">
-                      {Object.entries(categorizedTools).map(
-                        ([category, tools]) => (
-                          <div key={category}>
-                            <h4 className="text-lg font-semibold mb-3 flex items-center gap-2">
-                              <span className="text-xl">
-                                {(CategoryIcons as any)[category] ||
-                                  CategoryIcons.Unknown}
-                              </span>
-                              {category}
-                              <Chip size="sm" variant="flat" color="primary">
-                                {tools.length}
-                              </Chip>
-                            </h4>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              {tools.map((tool) => (
-                                <Card
-                                  key={tool.id}
-                                  className="hover:shadow-md transition-shadow cursor-pointer"
-                                >
-                                  <CardBody className="p-3">
-                                    <div className="flex justify-between items-start">
-                                      <div className="flex-1">
-                                        <h5 className="font-semibold text-sm mb-1">
-                                          {tool.name}
-                                        </h5>
-                                        <p className="text-xs text-gray-600 mb-2 line-clamp-2">
-                                          {tool.description}
-                                        </p>
-                                        <div className="flex gap-2">
-                                          <Chip
-                                            size="sm"
-                                            variant="flat"
-                                            color="secondary"
-                                          >
-                                            {tool.id}
-                                          </Chip>
-                                          <Button
-                                            size="sm"
-                                            variant="flat"
-                                            color="primary"
-                                            onPress={() => {
-                                              if (inputValue.trim()) {
-                                                handleToolSpecificQuery(
-                                                  tool.id
-                                                );
-                                                onClose();
-                                              } else {
-                                                setSelectedTool(tool.id);
-                                              }
-                                            }}
-                                          >
-                                            Use Tool
-                                          </Button>
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </CardBody>
-                                </Card>
-                              ))}
-                            </div>
+            <div className="space-y-4">
+              {toolRegistries && (
+                <>
+                  <Card>
+                    <CardHeader>
+                      <h4 className="text-lg font-semibold">
+                        Open Source Registry
+                      </h4>
+                    </CardHeader>
+                    <CardBody>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-gray-600">
+                            {toolRegistries.registries.open_source.name}
+                          </p>
+                          <p className="text-sm text-gray-500">
+                            Status:{" "}
+                            {toolRegistries.registries.open_source.status}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-2xl font-bold text-blue-600">
+                            {toolRegistries.registries.open_source.tool_count}
                           </div>
-                        )
-                      )}
-                    </div>
-                  </Tab>
-                );
-              })}
-            </Tabs>
+                          <div className="text-sm text-gray-500">tools</div>
+                        </div>
+                      </div>
+                    </CardBody>
+                  </Card>
+
+                  <Card>
+                    <CardHeader>
+                      <h4 className="text-lg font-semibold">
+                        Portia Cloud Registry
+                      </h4>
+                    </CardHeader>
+                    <CardBody>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-gray-600">
+                            {toolRegistries.registries.cloud.name}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-sm text-gray-500">
+                              Status: {toolRegistries.registries.cloud.status}
+                            </p>
+                            {toolRegistries.registries.cloud.authenticated && (
+                              <Chip size="sm" color="success" variant="flat">
+                                Authenticated
+                              </Chip>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-2xl font-bold text-green-600">
+                            {toolRegistries.registries.cloud.tool_count}
+                          </div>
+                          <div className="text-sm text-gray-500">tools</div>
+                        </div>
+                      </div>
+                    </CardBody>
+                  </Card>
+                </>
+              )}
+              {/* Tool details temporarily disabled - need to create new endpoints for detailed tool info */}
+            </div>
           </ModalBody>
           <ModalFooter>
             <Button variant="light" onPress={onClose}>
