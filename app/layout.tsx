@@ -3,7 +3,7 @@ import { Metadata, Viewport } from "next";
 import { Link } from "@nextui-org/link";
 import clsx from "clsx";
 
-//layout.tsx
+
 import { Providers } from "./providers";
 
 import { siteConfig } from "@/config/site";
