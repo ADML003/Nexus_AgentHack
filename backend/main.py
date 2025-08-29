@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Nexus Portia Backend - Proper Implementation
+Nexus Portia Backend - Google & Mistral Only
 Following Portia documentation exactly:
-1. Google as primary, Mistral as secondary, OpenAI as tertiary (reordered due to OpenAI quota limits)
+1. Google as primary, Mistral as fallback (OpenAI completely removed)
 2. Full tool integration (open source + cloud)
 3. Proper result extraction from nested run.result structure
-4. Complete error handling and multi-provider fallback
+4. Complete error handling and provider fallback
 """
 
 import os
@@ -30,24 +30,23 @@ from pydantic import SecretStr
 # Load environment variables
 load_dotenv(".env.local")
 
-# Configuration - Check all API keys
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# Configuration - Check Google and Mistral API keys only (OpenAI removed)
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
 PORTIA_API_KEY = os.getenv("PORTIA_API_KEY")
 
-print("🚀 Starting Nexus Portia Backend - Proper Implementation")
+print("🚀 Starting Nexus Portia Backend - Google & Mistral Only")
 print("🔑 API Key Status:")
-print(f"   OpenAI: {'✅' if OPENAI_API_KEY else '❌'}")
 print(f"   Google: {'✅' if GOOGLE_API_KEY else '❌'}")
 print(f"   Mistral: {'✅' if MISTRAL_API_KEY else '❌'}")
 print(f"   Portia: {'✅' if PORTIA_API_KEY else '❌'}")
+print("   OpenAI: ❌ Disabled (removed from configuration)")
 
 # Create FastAPI app
 app = FastAPI(
     title="Nexus Portia Backend", 
     version="2.0.0",
-    description="Proper implementation with Google->Mistral->OpenAI fallback and full tool integration"
+    description="Google Gemini & Mistral implementation with full tool integration (OpenAI disabled)"
 )
 
 # CORS
@@ -171,15 +170,13 @@ def initialize_providers():
         # OFFICIAL PATTERN: Single config with all API keys, automatic provider inference
         config = default_config()
         
-        # Set all API keys in the config (official pattern)
+        # Set all API keys in the config (official pattern - Google & Mistral only)
         if PORTIA_API_KEY:
             config.portia_api_key = SecretStr(PORTIA_API_KEY)
         if GOOGLE_API_KEY:
             config.google_api_key = SecretStr(GOOGLE_API_KEY)
         if MISTRAL_API_KEY:
             config.mistralai_api_key = SecretStr(MISTRAL_API_KEY)
-        if OPENAI_API_KEY:
-            config.openai_api_key = SecretStr(OPENAI_API_KEY)
         
         # Set primary provider (Google since it's working)
         config.llm_provider = LLMProvider.GOOGLE
@@ -195,7 +192,7 @@ def initialize_providers():
         registry_type = "cloud" if shared_cloud_registry else "open-source"
         print(f"✅ Portia instance initialized with Google as primary provider")
         print(f"✅ Using {registry_type} tool registry")
-        print(f"✅ Available fallback providers: Mistral, OpenAI")
+        print(f"✅ Available fallback provider: Mistral (OpenAI disabled)")
         
     except Exception as e:
         print(f"❌ Portia instance initialization failed: {e}")
@@ -240,8 +237,9 @@ async def health_check():
         "provider": {
             "available": portia_instance is not None,
             "primary": "google" if portia_instance else None,
-            "model": "google/gemini-1.5-flash" if portia_instance else None,
-            "fallbacks": ["mistral", "openai"] if portia_instance else []
+            "fallbacks": ["mistral"] if portia_instance else [],
+            "disabled": ["openai"],
+            "note": "OpenAI removed due to quota issues"
         },
         "tools": {
             "open_source_count": len(os_tools),
@@ -326,7 +324,7 @@ async def process_query(request: QueryRequest):
     
     try:
         print(f"📝 Processing query: '{request.message}'")
-        print(f"🔧 Using Portia instance with Google primary, Mistral/OpenAI fallbacks")
+        print(f"🔧 Using Portia instance with Google primary, Mistral fallback (OpenAI disabled)")
         
         if not request.message or not request.message.strip():
             raise ValueError("Empty message provided")

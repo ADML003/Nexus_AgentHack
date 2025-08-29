@@ -19,14 +19,8 @@ echo "✅ Found .env.local file"
 echo "🔑 Loading environment variables..."
 export $(grep -v '^#' .env.local | xargs)
 
-# Verify key API keys are loaded
+# Verify key API keys are loaded (Google & Mistral only)
 echo "🔍 Checking API keys..."
-if [ -n "$OPENAI_API_KEY" ]; then
-    echo "   ✅ OpenAI API key loaded"
-else
-    echo "   ❌ OpenAI API key missing"
-fi
-
 if [ -n "$GOOGLE_API_KEY" ]; then
     echo "   ✅ Google API key loaded"
 else
@@ -44,6 +38,8 @@ if [ -n "$PORTIA_API_KEY" ]; then
 else
     echo "   ❌ Portia API key missing"
 fi
+
+echo "   ℹ️  OpenAI API disabled (removed from configuration)"
 
 # Activate virtual environment if it exists
 if [ -d ".venv" ]; then
