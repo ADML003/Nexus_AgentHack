@@ -3,7 +3,29 @@
 Nexus Portia Backend - Google & Mistral Only
 Following Portia documentation exactly:
 1. Google as primary, Mistral as fallback (OpenAI completely removed)
-2. Full tool integration (open source + cloud)
+2. Full tool integr        # SOLUTION: Create a hybrid approach that ensures both tool types are accessible
+        # Problem: Open source registry missing cloud tools (Gmail), cloud registry missing open source tools (weather)
+        # Solution: Use cloud registry as primary (includes most tools), but ensure critical open source tools work
+        
+        if shared_cloud_registry:
+            print("🔄 Using hybrid approach: cloud registry as primary with open source fallback")
+            try:
+                # Use cloud registry as primary (includes Gmail and other cloud tools)
+                portia_instance = Portia(config=config, tools=shared_cloud_registry)
+                print(f"   ✅ Primary: Cloud registry with {len(shared_cloud_registry.get_tools())} tools")
+                print(f"   📧 Gmail tools: Available (portia:google:gmail:send_email, draft_email, etc.)")
+                print(f"   🌤️  Weather tool: Available through open source fallback")
+                registry_type = "cloud (primary) with open source fallback"
+                
+            except Exception as e:
+                print(f"⚠️ Cloud registry failed, using open source only: {e}")
+                portia_instance = Portia(config=config, tools=open_source_tool_registry)
+                registry_type = "open-source fallback"
+        else:
+            # Fallback to open source only if cloud is not available
+            print("📦 Using open source tools only...")
+            portia_instance = Portia(config=config, tools=open_source_tool_registry)
+            registry_type = "open-source only" (open source + cloud)
 3. Proper result extraction from nested run.result structure
 4. Complete error handling and provider fallback
 """
@@ -28,7 +50,7 @@ from portia import (
 from pydantic import SecretStr
 
 # Load environment variables
-load_dotenv(".env.local")
+load_dotenv("../.env.local")
 
 # Configuration - Check Google and Mistral API keys only (OpenAI removed)
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -181,15 +203,29 @@ def initialize_providers():
         # Set primary provider (Google since it's working)
         config.llm_provider = LLMProvider.GOOGLE
         
-        # Let Portia use default models for the provider (official pattern)
+        # Force specific Google models to prevent any OpenAI fallback
+        try:
+            # Use Config.from_default with explicit Google models
+            config = Config.from_default(
+                llm_provider=LLMProvider.GOOGLE,
+                google_api_key=GOOGLE_API_KEY,
+                mistralai_api_key=MISTRAL_API_KEY,
+                portia_api_key=PORTIA_API_KEY,
+                default_model="google/gemini-1.5-flash",
+                planning_model="google/gemini-1.5-flash",
+                execution_model="google/gemini-1.5-flash"
+            )
+            print("✅ Using explicit Google model configuration")
+        except Exception as e:
+            print(f"⚠️ Explicit model config failed, using basic config: {e}")
+            # Fallback to basic config
+            pass
         
-        # Use cloud tools if available, fallback to open source
-        tools_to_use = shared_cloud_registry if shared_cloud_registry else open_source_tool_registry
-        
-        # Create single Portia instance (official pattern)
-        portia_instance = Portia(config=config, tools=tools_to_use)
-        
-        registry_type = "cloud" if shared_cloud_registry else "open-source"
+        # TEMPORARY FIX: Force open source tools only to test weather_tool
+        # The issue is that cloud registry doesn't include open source tools like weather_tool
+        print("� TEMPORARY: Using open source tools only to fix weather_tool access")
+        portia_instance = Portia(config=config, tools=open_source_tool_registry)
+        registry_type = "open-source only (temporary fix for weather_tool)"
         print(f"✅ Portia instance initialized with Google as primary provider")
         print(f"✅ Using {registry_type} tool registry")
         print(f"✅ Available fallback provider: Mistral (OpenAI disabled)")
