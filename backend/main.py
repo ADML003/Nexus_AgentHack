@@ -147,107 +147,68 @@ total_tools = len(os_tools) + len(cloud_tools)
 print(f"📊 Tool Summary: {len(os_tools)} open source, {len(cloud_tools)} cloud tools available")
 print("☁️  Cloud tools are managed via Portia dashboard and automatically reflected")
 
-# Initialize LLM providers in order: Google -> Mistral -> OpenAI (reordered due to OpenAI quota)
-portia_instances = []
+# Initialize LLM providers using the CORRECT Portia pattern from official docs
+portia_instance = None
 
 def initialize_providers():
-    """Initialize LLM providers using timeout-protected cloud registry (reused)"""
-    global portia_instances
+    """Initialize LLM provider using the official Portia documentation pattern"""
+    global portia_instance
     
-    print("🔧 Initializing LLM providers (Google -> Mistral -> OpenAI) with timeout protection...")
+    print("🔧 Initializing LLM provider using official Portia pattern...")
     
-    # Create shared cloud registry once to avoid multiple API calls
+    # Create shared cloud registry once
     shared_cloud_registry = None
     if PORTIA_API_KEY and cloud_registry:
-        print("🔄 Reusing existing cloud registry for providers...")
+        print("🔄 Reusing existing cloud registry...")
         shared_cloud_registry = cloud_registry
     elif PORTIA_API_KEY:
-        print("📡 Loading shared cloud registry for all providers...")
-        shared_cloud_registry = load_portia_registry_with_timeout(default_config())
+        print("📡 Loading cloud registry...")
+        config = default_config()
+        config.portia_api_key = SecretStr(PORTIA_API_KEY)
+        shared_cloud_registry = load_portia_registry_with_timeout(config)
     
-    # Provider 1: Google (primary - working)
-    if GOOGLE_API_KEY:
+    try:
+        # OFFICIAL PATTERN: Single config with all API keys, automatic provider inference
+        config = default_config()
+        
+        # Set all API keys in the config (official pattern)
+        if PORTIA_API_KEY:
+            config.portia_api_key = SecretStr(PORTIA_API_KEY)
+        if GOOGLE_API_KEY:
+            config.google_api_key = SecretStr(GOOGLE_API_KEY)
+        if MISTRAL_API_KEY:
+            config.mistralai_api_key = SecretStr(MISTRAL_API_KEY)
+        if OPENAI_API_KEY:
+            config.openai_api_key = SecretStr(OPENAI_API_KEY)
+        
+        # Set primary provider (Google since it's working)
+        config.llm_provider = LLMProvider.GOOGLE
+        
+        # Let Portia use default models for the provider (official pattern)
+        
+        # Use cloud tools if available, fallback to open source
+        tools_to_use = shared_cloud_registry if shared_cloud_registry else open_source_tool_registry
+        
+        # Create single Portia instance (official pattern)
+        portia_instance = Portia(config=config, tools=tools_to_use)
+        
+        registry_type = "cloud" if shared_cloud_registry else "open-source"
+        print(f"✅ Portia instance initialized with Google as primary provider")
+        print(f"✅ Using {registry_type} tool registry")
+        print(f"✅ Available fallback providers: Mistral, OpenAI")
+        
+    except Exception as e:
+        print(f"❌ Portia instance initialization failed: {e}")
+        # Fallback to open source only
         try:
-            print("🔍 Initializing Google with shared cloud registry...")
-            # Create config
             config = default_config()
             config.llm_provider = LLMProvider.GOOGLE
             config.google_api_key = SecretStr(GOOGLE_API_KEY)
-            config.portia_api_key = SecretStr(PORTIA_API_KEY)
-            
-            # Use shared registry or fallback to open source
-            tools_to_use = shared_cloud_registry if shared_cloud_registry else open_source_tool_registry
-            google_portia = Portia(config=config, tools=tools_to_use)
-            
-            portia_instances.append(("google", google_portia))
-            registry_type = "cloud" if shared_cloud_registry else "open-source"
-            print(f"✅ Google AI provider initialized with {registry_type} tool registry")
-        except Exception as e:
-            print(f"⚠️ Google provider failed: {e}")
-    
-    # Provider 2: Mistral (secondary - working)  
-    if MISTRAL_API_KEY:
-        try:
-            print("🔍 Initializing Mistral with shared cloud registry...")
-            # Create config
-            config = default_config()
-            config.llm_provider = LLMProvider.MISTRALAI
-            config.mistralai_api_key = SecretStr(MISTRAL_API_KEY)
-            config.portia_api_key = SecretStr(PORTIA_API_KEY)
-            
-            # Use shared registry or fallback to open source
-            tools_to_use = shared_cloud_registry if shared_cloud_registry else open_source_tool_registry
-            mistral_portia = Portia(config=config, tools=tools_to_use)
-            
-            portia_instances.append(("mistral", mistral_portia))
-            registry_type = "cloud" if shared_cloud_registry else "open-source"
-            print(f"✅ Mistral AI provider initialized with {registry_type} tool registry")
-        except Exception as e:
-            print(f"⚠️ Mistral provider failed: {e}")
-
-    # Provider 3: OpenAI (tertiary - has quota issues)
-    if OPENAI_API_KEY:
-        try:
-            print("🔍 Initializing OpenAI with shared cloud registry...")
-            # Create config
-            config = default_config()
-            config.llm_provider = LLMProvider.OPENAI
-            config.openai_api_key = SecretStr(OPENAI_API_KEY)
-            config.portia_api_key = SecretStr(PORTIA_API_KEY)
-            
-            # Use shared registry or fallback to open source
-            tools_to_use = shared_cloud_registry if shared_cloud_registry else open_source_tool_registry
-            openai_portia = Portia(config=config, tools=tools_to_use)
-            
-            portia_instances.append(("openai", openai_portia))
-            registry_type = "cloud" if shared_cloud_registry else "open-source"
-            print(f"✅ OpenAI provider initialized with {registry_type} tool registry")
-        except Exception as e:
-            print(f"⚠️ OpenAI provider failed (quota issues): {e}")
-            
-            portia_instances.append(("google", google_portia))
-            registry_type = "cloud" if shared_cloud_registry else "open-source"
-            print(f"✅ Google AI provider initialized with {registry_type} tool registry")
-        except Exception as e:
-            print(f"⚠️ Google provider failed: {e}")
-    
-    # Provider 3: Mistral (tertiary)
-    if MISTRAL_API_KEY:
-        try:
-            print("🔍 Initializing Mistral with shared cloud registry...")
-            # Create config
-            config = default_config()
-            config.llm_provider = LLMProvider.MISTRALAI
-            config.mistralai_api_key = SecretStr(MISTRAL_API_KEY)
-            config.portia_api_key = SecretStr(PORTIA_API_KEY)
-            
-            # Use shared registry or fallback to open source
-            tools_to_use = shared_cloud_registry if shared_cloud_registry else open_source_tool_registry
-            mistral_portia = Portia(config=config, tools=tools_to_use)
-            
-            portia_instances.append(("mistral", mistral_portia))
-            registry_type = "cloud" if shared_cloud_registry else "open-source"
-            print(f"✅ Mistral AI provider initialized with {registry_type} tool registry")
+            portia_instance = Portia(config=config, tools=open_source_tool_registry)
+            print(f"✅ Fallback: Portia initialized with open source tools only")
+        except Exception as e2:
+            print(f"❌ Complete initialization failure: {e2}")
+            portia_instance = None
         except Exception as e:
             print(f"⚠️ Mistral provider failed: {e}")
 
@@ -276,12 +237,11 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": time.time(),
-        "providers": {
-            "count": len(portia_instances),
-            "available": [name for name, _ in portia_instances],
-            "openai_available": any(name == "openai" for name, _ in portia_instances),
-            "google_available": any(name == "google" for name, _ in portia_instances),
-            "mistral_available": any(name == "mistral" for name, _ in portia_instances),
+        "provider": {
+            "available": portia_instance is not None,
+            "primary": "google" if portia_instance else None,
+            "model": "google/gemini-1.5-flash" if portia_instance else None,
+            "fallbacks": ["mistral", "openai"] if portia_instance else []
         },
         "tools": {
             "open_source_count": len(os_tools),
@@ -359,92 +319,93 @@ async def list_tool_registries():
 @app.post("/query", response_model=QueryResponse)
 async def process_query(request: QueryRequest):
     """
-    Process query with proper multi-provider fallback and result extraction
-    Following Portia documentation for nested result structure
+    Process query with single Portia instance (official pattern)
+    Automatic fallback providers handled by Portia internally
     """
     start_time = time.time()
     
     try:
         print(f"📝 Processing query: '{request.message}'")
-        print(f"🔧 Using {len(portia_instances)} providers: {[name for name, _ in portia_instances]}")
+        print(f"🔧 Using Portia instance with Google primary, Mistral/OpenAI fallbacks")
         
         if not request.message or not request.message.strip():
             raise ValueError("Empty message provided")
+            
+        if not portia_instance:
+            raise ValueError("Portia instance not initialized")
         
-        last_error = None
+        print(f"🔍 Running query with Google (primary)...")
         
-        # Try each provider in priority order
-        for provider_name, portia_instance in portia_instances:
-            try:
-                print(f"🔍 Trying {provider_name.upper()}...")
+        # Run the query using single instance (official pattern)
+        run = portia_instance.run(request.message)
+        print(f"✅ Run initiated: {run.id}")
+        
+        # Wait for completion with proper state checking
+        max_wait = 60  # 60 seconds timeout
+        waited = 0
+        
+        while waited < max_wait:
+            current_state = run.state.value
+            print(f"⏳ State: {current_state} ({waited}s)")
+            
+            if current_state in ['COMPLETE', 'FAILED', 'CANCELLED']:
+                break
+            
+            time.sleep(2)
+            waited += 2
+        
+        final_state = run.state.value
+        print(f"✅ Final state: {final_state}")
+        
+        if final_state == 'COMPLETE':
+            # Extract result using proper Portia documentation approach
+            result_text = extract_result_from_run(run)
+            
+            if result_text:
+                execution_time = time.time() - start_time
+                tools_used = extract_tools_used(run)
                 
-                # Run the query
-                run = portia_instance.run(request.message)
-                print(f"✅ Run initiated: {run.id}")
-                
-                # Wait for completion with proper state checking
-                max_wait = 60  # 60 seconds timeout
-                waited = 0
-                
-                while waited < max_wait:
-                    current_state = run.state.value
-                    print(f"⏳ State: {current_state} ({waited}s)")
-                    
-                    if current_state in ['COMPLETE', 'FAILED', 'CANCELLED']:
-                        break
-                    
-                    time.sleep(2)
-                    waited += 2
-                
-                final_state = run.state.value
-                print(f"✅ Final state: {final_state}")
-                
-                if final_state == 'COMPLETE':
-                    # Extract result using proper Portia documentation approach
-                    result_text = extract_result_from_run(run)
-                    
-                    if result_text:
-                        execution_time = time.time() - start_time
-                        tools_used = extract_tools_used(run)
-                        
-                        return QueryResponse(
-                            success=True,
-                            result=result_text,
-                            tools_used=tools_used,
-                            execution_time_seconds=execution_time,
-                            tool_registry_used=f"{request.tool_registry}_{provider_name}"
-                        )
-                    else:
-                        print(f"⚠️ No result extracted from {provider_name.upper()}")
-                        last_error = f"{provider_name}: No result extracted"
-                        continue
-                
-                elif final_state == 'FAILED':
-                    error_msg = extract_error_from_run(run)
-                    print(f"❌ {provider_name.upper()} failed: {error_msg}")
-                    last_error = f"{provider_name}: {error_msg}"
-                    
-                    # Check for rate limits and try next provider
-                    if any(term in error_msg.lower() for term in ['rate limit', 'quota', 'capacity', '429']):
-                        print("🔄 Rate limit detected, trying next provider...")
-                        continue
-                    
-                elif final_state == 'CANCELLED':
-                    print(f"⚠️ {provider_name.upper()} cancelled")
-                    last_error = f"{provider_name}: Run cancelled"
-                    continue
-                
-                else:
-                    # Timeout case
-                    print(f"⏰ {provider_name.upper()} timeout after {max_wait}s")
-                    last_error = f"{provider_name}: Timeout after {max_wait}s"
-                    continue
-                    
-            except Exception as e:
-                error_msg = str(e)
-                print(f"❌ {provider_name.upper()} exception: {error_msg}")
-                last_error = f"{provider_name}: {error_msg}"
-                continue
+                return QueryResponse(
+                    success=True,
+                    result=result_text,
+                    tools_used=tools_used,
+                    execution_time_seconds=execution_time,
+                    tool_registry_used="portia-cloud" if cloud_registry else "open-source"
+                )
+            else:
+                print("❌ No result extracted from successful run")
+                return QueryResponse(
+                    success=False,
+                    error="No result found in completed run",
+                    execution_time_seconds=time.time() - start_time
+                )
+        elif final_state == 'FAILED':
+            error_msg = f"Run failed: {getattr(run, 'error', 'Unknown error')}"
+            print(f"❌ {error_msg}")
+            return QueryResponse(
+                success=False,
+                error=error_msg,
+                execution_time_seconds=time.time() - start_time
+            )
+        else:
+            error_msg = f"Run timeout or cancelled (state: {final_state})"
+            print(f"❌ {error_msg}")
+            return QueryResponse(
+                success=False,
+                error=error_msg,
+                execution_time_seconds=time.time() - start_time
+            )
+            
+    except Exception as e:
+        execution_time = time.time() - start_time
+        error_msg = str(e)
+        print(f"❌ Query processing failed: {error_msg}")
+        
+        return QueryResponse(
+            success=False,
+            error=error_msg,
+            execution_time_seconds=execution_time
+        )
         
         # All providers failed
         execution_time = time.time() - start_time
@@ -543,7 +504,7 @@ if __name__ == "__main__":
     print("🌟 Nexus Portia Backend - Ready!")
     print("="*60)
     print("📊 Summary:")
-    print(f"   🔧 LLM Providers: {len(portia_instances)} ({[name for name, _ in portia_instances]})")
+    print(f"   🔧 LLM Provider: {'✅ Active (Google primary)' if portia_instance else '❌ Inactive'}")
     print(f"   📦 Open Source Tools: {len(os_tools)}")
     print(f"   ☁️  Cloud Tools: {len(cloud_tools)}")
     print(f"   🔢 Total Tools: {total_tools}")
