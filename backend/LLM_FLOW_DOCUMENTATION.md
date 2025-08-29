@@ -6,6 +6,8 @@ The Nexus AI Backend is a FastAPI-based server that provides intelligent AI quer
 
 ## 🎯 Primary Model Flow
 
+(The api keys are getting exhausted, rest the application is running great!)
+
 ```
 1. Google Gemini 1.5 Pro (Primary)
         ↓ (if fails/unavailable)
