@@ -80,7 +80,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Timeout handling for PortiaToolRegistry initialization
+
 def load_portia_registry_with_timeout(config, timeout=15):
     """
     Load PortiaToolRegistry with timeout handling to prevent hanging
