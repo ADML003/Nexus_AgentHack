@@ -82,10 +82,7 @@ app.add_middleware(
 
 
 def load_portia_registry_with_timeout(config, timeout=15):
-    """
-    Load PortiaToolRegistry with timeout handling to prevent hanging
-    Best practice: Add retry logic and fallback states for cloud registry
-    """
+    
     print(f"   📡 Loading cloud tool registry (timeout: {timeout}s)...")
     
     with concurrent.futures.ThreadPoolExecutor() as executor:
