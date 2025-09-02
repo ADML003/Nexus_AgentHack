@@ -25,12 +25,14 @@ import { title } from "@/components/primitives";
 interface Message {
   id: string;
   content: string;
-  sender: "user" | "bot";
+  sender: "user" | "bot" | "clarification";
   timestamp: Date;
   error?: boolean;
   toolsUsed?: string[];
   toolRegistry?: string;
   executionTime?: number;
+  clarification?: ClarificationData;
+  requiresUserAction?: boolean;
 }
 
 interface ToolInfo {
@@ -77,6 +79,15 @@ interface QueryResponse {
   error?: string;
   execution_time_seconds?: number;
   tool_registry_used?: string;
+  clarification?: ClarificationData;
+  requires_user_action?: boolean;
+}
+
+interface ClarificationData {
+  type: string;
+  message: string;
+  details?: Record<string, any>;
+  action_required: string;
 }
 
 // Icon components for different tool categories
@@ -175,41 +186,138 @@ export default function EnhancedAgentPage() {
 
       const data: QueryResponse = await response.json();
 
-      // Remove the processing message and add the actual response
+      // Remove the processing message
       setMessages((prev) =>
         prev.filter((msg) => msg.id !== processingMessage.id)
       );
 
-      // Robust result extraction as recommended
-      let output = "";
-      if (data.success) {
-        // Try to get the main output from API response using robust extraction
-        output =
-          data.result ||
-          (typeof data.result === "object"
-            ? JSON.stringify(data.result)
-            : "") ||
-          "Task completed successfully but no output was returned";
+      // Check if clarification is needed
+      if (data.requires_user_action && data.clarification) {
+        const clarificationMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          content: data.clarification.message,
+          sender: "clarification",
+          timestamp: new Date(),
+          clarification: data.clarification,
+          requiresUserAction: true,
+        };
+        setMessages((prev) => [...prev, clarificationMessage]);
       } else {
-        output = data.error || "Unknown error occurred";
+        // Normal response handling
+        let output = "";
+        if (data.success) {
+          // Try to get the main output from API response using robust extraction
+          output =
+            data.result ||
+            (typeof data.result === "object"
+              ? JSON.stringify(data.result)
+              : "") ||
+            "Task completed successfully but no output was returned";
+        } else {
+          output = data.error || "Unknown error occurred";
+        }
+
+        const botMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          content: output,
+          sender: "bot",
+          timestamp: new Date(),
+          error: !data.success,
+          toolsUsed: data.tools_used,
+          toolRegistry: data.tool_registry_used,
+          executionTime: data.execution_time_seconds,
+        };
+
+        setMessages((prev) => [...prev, botMessage]);
       }
-
-      const botMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: output,
-        sender: "bot",
-        timestamp: new Date(),
-        error: !data.success,
-        toolsUsed: data.tools_used,
-        toolRegistry: data.tool_registry_used,
-        executionTime: data.execution_time_seconds,
-      };
-
-      setMessages((prev) => [...prev, botMessage]);
     } catch (error) {
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
         content: "Failed to connect to the AI service. Please try again.",
+        sender: "bot",
+        timestamp: new Date(),
+        error: true,
+      };
+
+      setMessages((prev) => [...prev, errorMessage]);
+    }
+
+    setIsLoading(false);
+  };
+
+  const handleClarificationResponse = async (
+    clarificationId: string,
+    userResponse: string
+  ) => {
+    setIsLoading(true);
+
+    try {
+      const response = await fetch("http://localhost:8000/clarification", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          clarification_id: clarificationId,
+          user_response: userResponse,
+          user_id: "demo-user",
+          session_id: "demo-session",
+        }),
+      });
+
+      const data: QueryResponse = await response.json();
+
+      // Add user's clarification response
+      const userResponseMessage: Message = {
+        id: Date.now().toString(),
+        content: userResponse,
+        sender: "user",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, userResponseMessage]);
+
+      // Check if more clarification is needed
+      if (data.requires_user_action && data.clarification) {
+        const clarificationMessage: Message = {
+          id: (Date.now() + 1).toString(),
+          content: data.clarification.message,
+          sender: "clarification",
+          timestamp: new Date(),
+          clarification: data.clarification,
+          requiresUserAction: true,
+        };
+        setMessages((prev) => [...prev, clarificationMessage]);
+      } else {
+        // Final response
+        let output = "";
+        if (data.success) {
+          output =
+            data.result ||
+            (typeof data.result === "object"
+              ? JSON.stringify(data.result)
+              : "") ||
+            "Task completed successfully";
+        } else {
+          output = data.error || "Unknown error occurred";
+        }
+
+        const botMessage: Message = {
+          id: (Date.now() + 2).toString(),
+          content: output,
+          sender: "bot",
+          timestamp: new Date(),
+          error: !data.success,
+          toolsUsed: data.tools_used,
+          toolRegistry: data.tool_registry_used,
+          executionTime: data.execution_time_seconds,
+        };
+
+        setMessages((prev) => [...prev, botMessage]);
+      }
+    } catch (error) {
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        content: "Failed to send clarification response. Please try again.",
         sender: "bot",
         timestamp: new Date(),
         error: true,
@@ -385,11 +493,19 @@ export default function EnhancedAgentPage() {
                         : "justify-start"
                     }`}
                   >
-                    {message.sender === "bot" && (
+                    {(message.sender === "bot" ||
+                      message.sender === "clarification") && (
                       <Avatar
-                        icon={<div className="text-xl">🤖</div>}
+                        icon={
+                          <div className="text-xl">
+                            {message.sender === "clarification" ? "❓" : "🤖"}
+                          </div>
+                        }
                         classNames={{
-                          base: "bg-gradient-to-br from-blue-500 to-blue-600",
+                          base:
+                            message.sender === "clarification"
+                              ? "bg-gradient-to-br from-orange-500 to-orange-600"
+                              : "bg-gradient-to-br from-blue-500 to-blue-600",
                           icon: "text-white",
                         }}
                         size="sm"
@@ -399,6 +515,8 @@ export default function EnhancedAgentPage() {
                       className={`max-w-[80%] ${
                         message.sender === "user"
                           ? "bg-blue-500 text-white"
+                          : message.sender === "clarification"
+                          ? "bg-orange-50 border-orange-200 text-orange-800"
                           : message.error
                           ? "bg-red-50 border-red-200 text-red-800"
                           : "bg-white border-gray-200 text-gray-800 shadow-sm"
@@ -408,11 +526,130 @@ export default function EnhancedAgentPage() {
                         <div className="whitespace-pre-wrap text-sm leading-relaxed">
                           {message.content}
                         </div>
+
+                        {/* Clarification action buttons */}
+                        {message.sender === "clarification" &&
+                          message.clarification &&
+                          message.requiresUserAction && (
+                            <div className="mt-4 pt-3 border-t border-orange-200">
+                              <div className="text-xs text-orange-600 mb-2 font-medium">
+                                Action Required:{" "}
+                                {message.clarification.action_required}
+                              </div>
+                              {message.clarification.type ===
+                                "oauth_authorization" && (
+                                <div className="space-y-2">
+                                  <Button
+                                    size="sm"
+                                    color="primary"
+                                    onClick={() => {
+                                      if (
+                                        message.clarification?.details?.auth_url
+                                      ) {
+                                        window.open(
+                                          message.clarification.details
+                                            .auth_url,
+                                          "_blank"
+                                        );
+                                      }
+                                    }}
+                                  >
+                                    Open Authorization Link
+                                  </Button>
+                                  <div className="flex gap-2">
+                                    <Button
+                                      size="sm"
+                                      color="success"
+                                      variant="flat"
+                                      onClick={() =>
+                                        handleClarificationResponse(
+                                          message.id,
+                                          "authorized"
+                                        )
+                                      }
+                                    >
+                                      I've Authorized
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      color="danger"
+                                      variant="flat"
+                                      onClick={() =>
+                                        handleClarificationResponse(
+                                          message.id,
+                                          "denied"
+                                        )
+                                      }
+                                    >
+                                      Cancel
+                                    </Button>
+                                  </div>
+                                </div>
+                              )}
+                              {message.clarification.type ===
+                                "confirmation" && (
+                                <div className="flex gap-2">
+                                  <Button
+                                    size="sm"
+                                    color="success"
+                                    onClick={() =>
+                                      handleClarificationResponse(
+                                        message.id,
+                                        "yes"
+                                      )
+                                    }
+                                  >
+                                    Yes, Continue
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    color="danger"
+                                    variant="flat"
+                                    onClick={() =>
+                                      handleClarificationResponse(
+                                        message.id,
+                                        "no"
+                                      )
+                                    }
+                                  >
+                                    No, Cancel
+                                  </Button>
+                                </div>
+                              )}
+                              {message.clarification.type ===
+                                "input_required" && (
+                                <div className="space-y-2">
+                                  <Input
+                                    size="sm"
+                                    placeholder="Enter required information..."
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        const input = e.currentTarget.value;
+                                        if (input.trim()) {
+                                          handleClarificationResponse(
+                                            message.id,
+                                            input.trim()
+                                          );
+                                          e.currentTarget.value = "";
+                                        }
+                                      }
+                                    }}
+                                  />
+                                  <div className="text-xs text-orange-600">
+                                    Press Enter to submit
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
                         <div className="flex flex-wrap items-center gap-2 mt-3 pt-2 border-t border-gray-100">
                           <span
                             className={`text-xs ${
                               message.sender === "user"
                                 ? "text-blue-100"
+                                : message.sender === "clarification"
+                                ? "text-orange-500"
                                 : "text-gray-500"
                             }`}
                           >

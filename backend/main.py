@@ -252,6 +252,19 @@ class QueryRequest(BaseModel):
     tool_registry: str = "combined"
     user_id: Optional[str] = None
 
+class ClarificationRequest(BaseModel):
+    """Request to respond to a Portia clarification"""
+    plan_run_id: str  # The ID of the plan run waiting for clarification
+    response: str  # User's response to the clarification
+    user_id: Optional[str] = None
+
+class ClarificationModel(BaseModel):
+    """Model for Portia clarifications requiring user intervention"""
+    type: str  # Type of clarification (e.g., "oauth", "input", "permission")
+    message: str  # Human-readable message to show the user
+    details: Optional[Dict[str, Any]] = None  # Additional context/data
+    action_required: str  # What action the user needs to take
+
 class QueryResponse(BaseModel):
     success: bool
     result: Optional[str] = None
@@ -259,6 +272,8 @@ class QueryResponse(BaseModel):
     error: Optional[str] = None
     execution_time_seconds: Optional[float] = None
     tool_registry_used: Optional[str] = None
+    clarification: Optional[ClarificationModel] = None  # Portia clarification requiring user action
+    requires_user_action: bool = False  # Quick flag to check if user intervention needed
 
 # API Endpoints
 @app.get("/health")
@@ -379,6 +394,27 @@ async def process_query(request: QueryRequest):
             current_state = run.state.value
             print(f"⏳ State: {current_state} ({waited}s)")
             
+            # Check for clarifications (human intervention needed)
+            if hasattr(run, 'clarifications') and run.clarifications:
+                print(f"🔄 Clarification required: {len(run.clarifications)} pending")
+                clarification = run.clarifications[0]  # Get first clarification
+                
+                clarification_data = ClarificationModel(
+                    type=clarification.get('type', 'user_input'),
+                    message=clarification.get('message', 'User action required'),
+                    details=clarification.get('details', {}),
+                    action_required=clarification.get('action_required', 'Please provide the required input')
+                )
+                
+                execution_time = time.time() - start_time
+                return QueryResponse(
+                    success=False,  # Not complete yet, waiting for user
+                    clarification=clarification_data,
+                    requires_user_action=True,
+                    execution_time_seconds=execution_time,
+                    tool_registry_used="portia-cloud" if cloud_registry else "open-source"
+                )
+            
             if current_state in ['COMPLETE', 'FAILED', 'CANCELLED']:
                 break
             
@@ -455,6 +491,105 @@ async def process_query(request: QueryRequest):
             error=str(e),
             execution_time_seconds=execution_time,
             tool_registry_used="error"
+        )
+
+@app.post("/clarification", response_model=QueryResponse)
+async def respond_to_clarification(request: ClarificationRequest):
+    """
+    Respond to a Portia clarification and continue plan execution
+    """
+    start_time = time.time()
+    
+    try:
+        print(f"🔄 Responding to clarification for plan run: {request.plan_run_id}")
+        
+        if not portia_instance:
+            raise ValueError("Portia instance not initialized")
+        
+        # Get the plan run by ID
+        try:
+            run = portia_instance.get_run(request.plan_run_id)
+        except Exception as e:
+            raise ValueError(f"Plan run not found: {request.plan_run_id}")
+        
+        # Respond to the clarification
+        try:
+            run.respond_to_clarification(request.response)
+            print(f"✅ Clarification response sent: {request.response}")
+        except Exception as e:
+            raise ValueError(f"Failed to respond to clarification: {e}")
+        
+        # Wait for completion after clarification response
+        max_wait = 60
+        waited = 0
+        
+        while waited < max_wait:
+            current_state = run.state.value
+            print(f"⏳ State after clarification: {current_state} ({waited}s)")
+            
+            # Check for additional clarifications
+            if hasattr(run, 'clarifications') and run.clarifications:
+                clarification = run.clarifications[0]
+                clarification_data = ClarificationModel(
+                    type=clarification.get('type', 'user_input'),
+                    message=clarification.get('message', 'Additional user action required'),
+                    details=clarification.get('details', {}),
+                    action_required=clarification.get('action_required', 'Please provide additional input')
+                )
+                
+                execution_time = time.time() - start_time
+                return QueryResponse(
+                    success=False,
+                    clarification=clarification_data,
+                    requires_user_action=True,
+                    execution_time_seconds=execution_time,
+                    tool_registry_used="portia-cloud" if cloud_registry else "open-source"
+                )
+            
+            if current_state in ['COMPLETE', 'FAILED', 'CANCELLED']:
+                break
+            
+            time.sleep(2)
+            waited += 2
+        
+        final_state = run.state.value
+        print(f"✅ Final state after clarification: {final_state}")
+        
+        if final_state == 'COMPLETE':
+            result_text = extract_result_from_run(run)
+            if result_text:
+                execution_time = time.time() - start_time
+                tools_used = extract_tools_used(run)
+                
+                return QueryResponse(
+                    success=True,
+                    result=result_text,
+                    tools_used=tools_used,
+                    execution_time_seconds=execution_time,
+                    tool_registry_used="portia-cloud" if cloud_registry else "open-source"
+                )
+            else:
+                return QueryResponse(
+                    success=False,
+                    error="No result found after clarification",
+                    execution_time_seconds=time.time() - start_time
+                )
+        else:
+            return QueryResponse(
+                success=False,
+                error=f"Plan failed after clarification (state: {final_state})",
+                execution_time_seconds=time.time() - start_time
+            )
+            
+    except Exception as e:
+        execution_time = time.time() - start_time
+        error_msg = str(e)
+        print(f"❌ Clarification processing failed: {error_msg}")
+        
+        return QueryResponse(
+            success=False,
+            error=error_msg,
+            execution_time_seconds=execution_time
         )
 
 def extract_result_from_run(run) -> Optional[str]:
