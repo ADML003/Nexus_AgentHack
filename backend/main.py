@@ -166,11 +166,12 @@ print(f"📊 Tool Summary: {len(os_tools)} open source, {len(cloud_tools)} cloud
 print("☁️  Cloud tools are managed via Portia dashboard and automatically reflected")
 
 # Initialize LLM providers using the CORRECT Portia pattern from official docs
-portia_instance = None
+portia_instance_cloud = None
+portia_instance_open_source = None
 
 def initialize_providers():
     """Initialize LLM provider using the official Portia documentation pattern"""
-    global portia_instance
+    global portia_instance_cloud, portia_instance_open_source
     
     print("🔧 Initializing LLM provider using official Portia pattern...")
     
@@ -218,13 +219,20 @@ def initialize_providers():
             # Fallback to basic config
             pass
         
-        # TEMPORARY FIX: Force open source tools only to test weather_tool
-        # The issue is that cloud registry doesn't include open source tools like weather_tool
-        print("� TEMPORARY: Using open source tools only to fix weather_tool access")
-        portia_instance = Portia(config=config, tools=open_source_tool_registry)
-        registry_type = "open-source only (temporary fix for weather_tool)"
-        print(f"✅ Portia instance initialized with Google as primary provider")
-        print(f"✅ Using {registry_type} tool registry")
+        # Create cloud instance for Gmail and Google Workspace tools
+        if shared_cloud_registry:
+            print("🔧 Creating cloud instance for Gmail and Google Workspace tools")
+            portia_instance_cloud = Portia(config=config, tools=shared_cloud_registry)
+            print(f"✅ Cloud instance: {len(shared_cloud_registry.get_tools())} tools (includes Gmail, Google Docs, etc.)")
+        else:
+            print("⚠️ Cloud registry not available")
+        
+        # Create open source instance for weather and other open source tools
+        print("🔧 Creating open source instance for weather and basic tools")
+        portia_instance_open_source = Portia(config=config, tools=open_source_tool_registry)
+        print(f"✅ Open source instance: {len(open_source_tool_registry.get_tools())} tools (includes weather, calculator, etc.)")
+        
+        print(f"✅ Portia instances initialized with Google as primary provider")
         print(f"✅ Available fallback provider: Mistral (OpenAI disabled)")
         
     except Exception as e:
@@ -283,9 +291,9 @@ async def health_check():
         "status": "healthy",
         "timestamp": time.time(),
         "provider": {
-            "available": portia_instance is not None,
-            "primary": "google" if portia_instance else None,
-            "fallbacks": ["mistral"] if portia_instance else [],
+            "available": portia_instance_cloud is not None or portia_instance_open_source is not None,
+            "primary": "google" if (portia_instance_cloud or portia_instance_open_source) else None,
+            "fallbacks": ["mistral"] if (portia_instance_cloud or portia_instance_open_source) else [],
             "disabled": ["openai"],
             "note": "OpenAI removed due to quota issues"
         },
@@ -365,14 +373,48 @@ async def list_tool_registries():
 @app.post("/query", response_model=QueryResponse)
 async def process_query(request: QueryRequest):
     """
-    Process query with single Portia instance (official pattern)
+    Process query with appropriate Portia instance based on tool registry selection
     Automatic fallback providers handled by Portia internally
     """
     start_time = time.time()
     
     try:
         print(f"📝 Processing query: '{request.message}'")
-        print(f"🔧 Using Portia instance with Google primary, Mistral fallback (OpenAI disabled)")
+        print(f"🔧 Requested tool registry: {request.tool_registry}")
+        
+        # Select the appropriate Portia instance based on tool registry
+        if request.tool_registry == "cloud" and portia_instance_cloud:
+            portia_instance = portia_instance_cloud
+            registry_used = "cloud"
+            print(f"🔧 Using cloud instance (Gmail, Google Docs, etc.)")
+        elif request.tool_registry == "open_source" and portia_instance_open_source:
+            portia_instance = portia_instance_open_source
+            registry_used = "open_source"
+            print(f"🔧 Using open source instance (weather, calculator, etc.)")
+        elif request.tool_registry == "default" or request.tool_registry == "combined":
+            # For combined/default, prefer cloud if available (includes more tools)
+            if portia_instance_cloud:
+                portia_instance = portia_instance_cloud
+                registry_used = "cloud"
+                print(f"🔧 Using cloud instance for default/combined (includes Gmail + Google tools)")
+            elif portia_instance_open_source:
+                portia_instance = portia_instance_open_source
+                registry_used = "open_source"
+                print(f"🔧 Fallback to open source instance")
+            else:
+                raise ValueError("No Portia instances available")
+        else:
+            # Fallback logic
+            if portia_instance_cloud:
+                portia_instance = portia_instance_cloud
+                registry_used = "cloud"
+                print(f"🔧 Fallback to cloud instance")
+            elif portia_instance_open_source:
+                portia_instance = portia_instance_open_source
+                registry_used = "open_source"
+                print(f"🔧 Fallback to open source instance")
+            else:
+                raise ValueError("No Portia instances available")
         
         if not request.message or not request.message.strip():
             raise ValueError("Empty message provided")
@@ -382,7 +424,7 @@ async def process_query(request: QueryRequest):
         
         print(f"🔍 Running query with Google (primary)...")
         
-        # Run the query using single instance (official pattern)
+        # Run the query using selected instance
         run = portia_instance.run(request.message)
         print(f"✅ Run initiated: {run.id}")
         
@@ -412,7 +454,7 @@ async def process_query(request: QueryRequest):
                     clarification=clarification_data,
                     requires_user_action=True,
                     execution_time_seconds=execution_time,
-                    tool_registry_used="portia-cloud" if cloud_registry else "open-source"
+                    tool_registry_used=registry_used
                 )
             
             if current_state in ['COMPLETE', 'FAILED', 'CANCELLED']:
@@ -437,7 +479,7 @@ async def process_query(request: QueryRequest):
                     result=result_text,
                     tools_used=tools_used,
                     execution_time_seconds=execution_time,
-                    tool_registry_used="portia-cloud" if cloud_registry else "open-source"
+                    tool_registry_used=registry_used
                 )
             else:
                 print("❌ No result extracted from successful run")
@@ -494,7 +536,7 @@ async def process_query(request: QueryRequest):
         )
 
 @app.post("/clarification", response_model=QueryResponse)
-async def respond_to_clarification(request: ClarificationRequest):
+async def handle_clarification(request: ClarificationRequest):
     """
     Respond to a Portia clarification and continue plan execution
     """
@@ -503,13 +545,27 @@ async def respond_to_clarification(request: ClarificationRequest):
     try:
         print(f"🔄 Responding to clarification for plan run: {request.plan_run_id}")
         
-        if not portia_instance:
-            raise ValueError("Portia instance not initialized")
+        # Try to find the run in either instance
+        run = None
+        portia_instance = None
         
-        # Get the plan run by ID
-        try:
-            run = portia_instance.get_run(request.plan_run_id)
-        except Exception as e:
+        if portia_instance_cloud:
+            try:
+                run = portia_instance_cloud.get_run(request.plan_run_id)
+                portia_instance = portia_instance_cloud
+                print(f"✅ Found run in cloud instance")
+            except:
+                pass
+        
+        if not run and portia_instance_open_source:
+            try:
+                run = portia_instance_open_source.get_run(request.plan_run_id)
+                portia_instance = portia_instance_open_source
+                print(f"✅ Found run in open source instance")
+            except:
+                pass
+        
+        if not run:
             raise ValueError(f"Plan run not found: {request.plan_run_id}")
         
         # Respond to the clarification
@@ -529,12 +585,14 @@ async def respond_to_clarification(request: ClarificationRequest):
             
             # Check for additional clarifications
             if hasattr(run, 'clarifications') and run.clarifications:
+                print(f"🔄 Additional clarification required: {len(run.clarifications)} pending")
                 clarification = run.clarifications[0]
+                
                 clarification_data = ClarificationModel(
                     type=clarification.get('type', 'user_input'),
                     message=clarification.get('message', 'Additional user action required'),
                     details=clarification.get('details', {}),
-                    action_required=clarification.get('action_required', 'Please provide additional input')
+                    action_required=clarification.get('action_required', 'Please provide the required input')
                 )
                 
                 execution_time = time.time() - start_time
@@ -543,7 +601,7 @@ async def respond_to_clarification(request: ClarificationRequest):
                     clarification=clarification_data,
                     requires_user_action=True,
                     execution_time_seconds=execution_time,
-                    tool_registry_used="portia-cloud" if cloud_registry else "open-source"
+                    tool_registry_used="cloud" if portia_instance == portia_instance_cloud else "open_source"
                 )
             
             if current_state in ['COMPLETE', 'FAILED', 'CANCELLED']:
@@ -557,6 +615,7 @@ async def respond_to_clarification(request: ClarificationRequest):
         
         if final_state == 'COMPLETE':
             result_text = extract_result_from_run(run)
+            
             if result_text:
                 execution_time = time.time() - start_time
                 tools_used = extract_tools_used(run)
@@ -566,30 +625,27 @@ async def respond_to_clarification(request: ClarificationRequest):
                     result=result_text,
                     tools_used=tools_used,
                     execution_time_seconds=execution_time,
-                    tool_registry_used="portia-cloud" if cloud_registry else "open-source"
+                    tool_registry_used="cloud" if portia_instance == portia_instance_cloud else "open_source"
                 )
             else:
                 return QueryResponse(
                     success=False,
-                    error="No result found after clarification",
+                    error="Task completed but no result was returned",
                     execution_time_seconds=time.time() - start_time
                 )
         else:
             return QueryResponse(
                 success=False,
-                error=f"Plan failed after clarification (state: {final_state})",
+                error=f"Task failed with state: {final_state}",
                 execution_time_seconds=time.time() - start_time
             )
             
     except Exception as e:
-        execution_time = time.time() - start_time
-        error_msg = str(e)
-        print(f"❌ Clarification processing failed: {error_msg}")
-        
+        print(f"❌ Clarification handling failed: {e}")
         return QueryResponse(
             success=False,
-            error=error_msg,
-            execution_time_seconds=execution_time
+            error=f"Clarification handling failed: {str(e)}",
+            execution_time_seconds=time.time() - start_time
         )
 
 def extract_result_from_run(run) -> Optional[str]:
@@ -670,7 +726,7 @@ if __name__ == "__main__":
     print("🌟 Nexus Portia Backend - Ready!")
     print("="*60)
     print("📊 Summary:")
-    print(f"   🔧 LLM Provider: {'✅ Active (Google primary)' if portia_instance else '❌ Inactive'}")
+    print(f"   🔧 LLM Provider: {'✅ Active (Google primary)' if (portia_instance_cloud or portia_instance_open_source) else '❌ Inactive'}")
     print(f"   📦 Open Source Tools: {len(os_tools)}")
     print(f"   ☁️  Cloud Tools: {len(cloud_tools)}")
     print(f"   🔢 Total Tools: {total_tools}")
